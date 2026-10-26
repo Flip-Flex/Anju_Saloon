@@ -5,8 +5,16 @@ import toast from 'react-hot-toast';
 import {
   Pencil, Trash2, PlusCircle, X, Layers, Upload, Download, Printer, ListPlus,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CheckCircle, Info, Calendar,
-  CreditCard, CheckCircle2, AlertCircle, RefreshCw, UserPlus, UserCheck, DollarSign, Image as ImageIcon
+  CreditCard, CheckCircle2, AlertCircle, RefreshCw, UserPlus, UserCheck, DollarSign, Image as ImageIcon,
+  FileSpreadsheet, ChevronDown
 } from 'lucide-react';
+import { utils, writeFile, read } from 'xlsx';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { auth } from '@/lib/firebase';
 import { productApi, vendorApi, stockTransactionApi, Vendor, Product as BaseProduct } from '@/lib/api';
 import { useGlobalData } from '@/context/GlobalDataContext';
@@ -654,15 +662,9 @@ const Products = () => {
         const groupRows = billGroups[groupKey];
         const firstRow = groupRows[0];
 
-        // Validations
-        const supplierName = firstRow['Supplier Name'] || firstRow['supplierName'];
-        const date = firstRow['Date'] || firstRow['date'];
-
-        if (!supplierName || !date) {
-          failedCount += groupRows.length;
-          errors.push(`Group ${groupKey}: Missing Supplier Name, or Date.`);
-          continue;
-        }
+        // Validations & defaults
+        const supplierName = (firstRow['Supplier Name'] || firstRow['supplierName'] || 'General Supplier').toString().trim() || 'General Supplier';
+        const date = (firstRow['Date'] || firstRow['date'] || new Date().toISOString().split('T')[0]).toString().trim();
 
         // Identify / Create Supplier
         let vendor = matchSupplier(
@@ -846,57 +848,75 @@ const Products = () => {
     return { successCount, errorCount };
   };
 
-  const handleDownloadTemplate = () => {
-    const headers = [
-      "Supplier Name",
-      "Date",
-      "Product Name",
-      "Product Type",
-      "Purchase Price",
-      "Selling Price",
-      "Stock Quantity",
-      "Unlimited Stock",
-      "Category",
-      "GST %",
-      "Supplier Contact",
-      "Supplier Address",
-      "Supplier GST",
-      "Supplier Nickname",
-      "Product ID"
-    ];
-    
-    // Create a sample row
-    const sampleRow = [
-      "Sample Supplier",
-      new Date().toISOString().split('T')[0],
-      "Sample Product",
-      "RETAIL",
-      "100.00",
-      "150.00",
-      "10",
-      "N",
-      "General",
-      "0",
-      "9876543210",
-      "Sample Address",
-      "07AAAAA0000A1Z5", // Example 15-char GST
-      "Sample Nickname",
-      "PROD-001"
+  const handleDownloadTemplate = (format: 'excel' | 'csv' = 'excel') => {
+    const templateData = [
+      {
+        "Supplier Name": "L'Oreal Professional India",
+        "Date": new Date().toISOString().split('T')[0],
+        "Product Name": "Mythic Oil Nourishing Serum 100ml",
+        "Product Type": "RETAIL",
+        "Purchase Price": 650.00,
+        "Selling Price": 950.00,
+        "Stock Quantity": 24,
+        "Unlimited Stock": "N",
+        "Category": "Hair Care",
+        "GST %": 18,
+        "Supplier Contact": "9876543210",
+        "Supplier Address": "Mumbai, Maharashtra",
+        "Supplier GST": "27AAAAA0000A1Z5",
+        "Supplier Nickname": "LOreal Direct",
+        "Product ID": "PROD-101"
+      },
+      {
+        "Supplier Name": "Schwarzkopf Professional",
+        "Date": new Date().toISOString().split('T')[0],
+        "Product Name": "BC Bonacure Peptide Repair Shampoo 250ml",
+        "Product Type": "RETAIL",
+        "Purchase Price": 480.00,
+        "Selling Price": 750.00,
+        "Stock Quantity": 15,
+        "Unlimited Stock": "N",
+        "Category": "Hair Care",
+        "GST %": 18,
+        "Supplier Contact": "9876543211",
+        "Supplier Address": "Bengaluru, Karnataka",
+        "Supplier GST": "29BBBBB0000B1Z6",
+        "Supplier Nickname": "Schwarzkopf",
+        "Product ID": "PROD-102"
+      }
     ];
 
-    const csvContent = headers.join(",") + "\n"
-      + sampleRow.map(v => `"${v}"`).join(",");
-      
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", "products_upload_template.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    toast.success("Template downloaded successfully!");
+    const ws = utils.json_to_sheet(templateData);
+
+    // Set auto column widths for Excel
+    ws['!cols'] = [
+      { wch: 28 }, // Supplier Name
+      { wch: 14 }, // Date
+      { wch: 42 }, // Product Name
+      { wch: 14 }, // Product Type
+      { wch: 15 }, // Purchase Price
+      { wch: 15 }, // Selling Price
+      { wch: 15 }, // Stock Quantity
+      { wch: 16 }, // Unlimited Stock
+      { wch: 18 }, // Category
+      { wch: 10 }, // GST %
+      { wch: 18 }, // Supplier Contact
+      { wch: 25 }, // Supplier Address
+      { wch: 18 }, // Supplier GST
+      { wch: 18 }, // Supplier Nickname
+      { wch: 14 }, // Product ID
+    ];
+
+    const wb = utils.book_new();
+    utils.book_append_sheet(wb, ws, "Product Template");
+
+    if (format === 'csv') {
+      writeFile(wb, "products_upload_template.csv", { bookType: "csv" });
+      toast.success("CSV Template downloaded successfully!");
+    } else {
+      writeFile(wb, "products_upload_template.xlsx");
+      toast.success("Excel Template downloaded successfully!");
+    }
   };
 
   const handleSaveMultipleProducts = async (productsToSave: any[]) => {
@@ -927,21 +947,54 @@ const Products = () => {
     const file = event.target.files?.[0];
     if (!file) return;
     setIsLoading(true);
-    Papa.parse(file, {
-      header: true, skipEmptyLines: true,
-      complete: async (results: Papa.ParseResult<any>) => {
-        if (results.data.length === 0) {
-          toast.error("CSV file is empty or formatted incorrectly.");
-          setIsLoading(false); return;
+
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = utils.sheet_to_json(worksheet);
+          if (!jsonData || jsonData.length === 0) {
+            toast.error("Excel file is empty or formatted incorrectly.");
+            setIsLoading(false);
+            return;
+          }
+          await processUnifiedUpload(jsonData);
+        } catch (err: any) {
+          toast.error("Error parsing Excel file: " + err.message);
+          setIsLoading(false);
+        } finally {
+          if (fileInputRef.current) fileInputRef.current.value = "";
         }
-        await processUnifiedUpload(results.data);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      },
-      error: (error) => {
-        toast.error("Error parsing CSV file: " + error.message);
+      };
+      reader.onerror = () => {
+        toast.error("Failed to read Excel file.");
         setIsLoading(false);
-      }
-    });
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      Papa.parse(file, {
+        header: true, skipEmptyLines: true,
+        complete: async (results: Papa.ParseResult<any>) => {
+          if (results.data.length === 0) {
+            toast.error("CSV file is empty or formatted incorrectly.");
+            setIsLoading(false); return;
+          }
+          await processUnifiedUpload(results.data);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        },
+        error: (error) => {
+          toast.error("Error parsing CSV file: " + error.message);
+          setIsLoading(false);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+      });
+    }
   };
 
   const handleUploadClick = () => fileInputRef.current?.click();
@@ -1086,11 +1139,37 @@ const Products = () => {
           )}
           {isAdmin && (
             <>
-              <button onClick={handleDownloadTemplate} className="px-3 py-1.5 text-sm bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 flex items-center gap-2 whitespace-nowrap">
-                <Download size={18} /> Template
-              </button>
-              <button onClick={handleUploadClick} className="px-3 py-1.5 text-sm bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 flex items-center gap-2 whitespace-nowrap">
-                <Upload size={18} /> Upload CSV
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="px-3 py-1.5 text-sm bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 flex items-center gap-1.5 whitespace-nowrap shadow-sm transition-all">
+                    <Download size={17} /> Template <ChevronDown size={14} className="opacity-80 ml-0.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 bg-white shadow-xl border border-gray-200 z-50 p-1 rounded-lg">
+                  <DropdownMenuItem
+                    onClick={() => handleDownloadTemplate('excel')}
+                    className="flex items-center gap-2.5 cursor-pointer py-2 px-2.5 rounded-md hover:bg-emerald-50 text-gray-800 transition-colors"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs text-gray-900">Excel Template (.xlsx)</span>
+                      <span className="text-[10px] text-gray-500">Opens in Microsoft Excel / Sheets</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleDownloadTemplate('csv')}
+                    className="flex items-center gap-2.5 cursor-pointer py-2 px-2.5 rounded-md hover:bg-blue-50 text-gray-800 transition-colors"
+                  >
+                    <Download className="w-4 h-4 text-blue-600 shrink-0" />
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs text-gray-900">CSV Template (.csv)</span>
+                      <span className="text-[10px] text-gray-500">Plain comma-separated file</span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <button onClick={handleUploadClick} className="px-3 py-1.5 text-sm bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 flex items-center gap-2 whitespace-nowrap shadow-sm transition-all">
+                <Upload size={18} /> Upload (Excel / CSV)
               </button>
               <button onClick={() => setCategoryModalOpen(true)} className="px-3 py-1.5 text-sm bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 flex items-center gap-2 whitespace-nowrap">
                 <Layers size={18} /> Categories
@@ -1106,7 +1185,7 @@ const Products = () => {
         </div>
       </div>
 
-      <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />
+      <input type="file" ref={fileInputRef} className="hidden" accept=".csv, .xlsx, .xls" onChange={handleFileUpload} />
 
       <div className="bg-white rounded-lg shadow-sm flex flex-col h-[calc(100vh-220px)]">
         {isLoading ? (

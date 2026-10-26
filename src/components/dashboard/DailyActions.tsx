@@ -27,7 +27,7 @@ import {
     Printer,
     Clock
 } from 'lucide-react';
-import { daybookApi, DayBookEntry, CashTally, billingApi, Bill, staffApi } from '@/lib/api';
+import { daybookApi, DayBookEntry, CashTally, billingApi, Bill, staffApi, Commission } from '@/lib/api';
 import { SyncIndicator } from '@/components/SyncIndicator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -507,8 +507,12 @@ const DailyActions = () => {
         const tally: CashTally = {
             date: startDate,
             openingBalance: parseFloat(openingBalance) || 0,
+            expectedCash: systemNet,
+            totalCashHand: physicalTotal,
+            difference: physicalTotal - systemNet,
             denominations: denomNumbers,
-            totalCashHand: physicalTotal
+            closedAt: new Date().toISOString(),
+            isClosed: true
         };
 
         setIsSyncing(true);
@@ -593,10 +597,7 @@ const DailyActions = () => {
         });
 
         commissions.forEach(c => {
-            // Filter commissions by the bill ID prefix
-            const bId = (c.billId || "").toString();
-            const isRetailComm = bId.startsWith("MSWS");
-            const commType = isRetailComm ? "Retail" : "Retail";
+            const commType = "Retail";
             if (systemTypeFilter !== 'All' && commType !== systemTypeFilter) return;
 
             const amount = parseAmount(c.staffCommissionAmount || c.commissionAmount || c.amount);
@@ -1179,17 +1180,7 @@ const DailyActions = () => {
                     <SyncIndicator isSyncing={isSyncing} />
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 mr-2">
-                        {['All', 'Retail'].map((type) => (
-                            <button
-                                key={type}
-                                onClick={() => setSystemTypeFilter(type as any)}
-                                className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${systemTypeFilter === type ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}
-                            >
-                                {type.toUpperCase()}
-                            </button>
-                        ))}
-                    </div>
+
                     <button
                         onClick={handleDownloadAccountingReport}
                         className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-slate-800 border-slate-700 text-white hover:bg-slate-700 transition-all shadow-sm"

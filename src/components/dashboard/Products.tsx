@@ -21,8 +21,7 @@ import { formatBarcodeMeta } from '@/lib/barcodeUtils';
 import { printProductBarcodes } from '@/lib/printBarcodeUtils';
 
 // Data Structures
-interface Product extends BaseProduct {
-}
+type Product = BaseProduct;
 
 type SelectedProducts = {
   [productId: string]: {
@@ -194,7 +193,7 @@ const Products = () => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const { settings } = useGlobalData();
-  const defaultGst = settings?.defaultGst || '5';
+  const defaultGst = Number(settings?.defaultGst || 5);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedProducts, setSelectedProducts] = useState<SelectedProducts>({});
   const [startDate, setStartDate] = useState('');
@@ -757,7 +756,7 @@ const Products = () => {
             price: sellPrice,
             sellingPrice: sellPrice,
             stockQuantity: existingProduct ? (existingProduct.stockQuantity + qty) : qty,
-            inventoryTracking: isUnlimited ? 'NOT_TRACKED' : 'TRACKED',
+            inventoryTracking: (isUnlimited ? 'NOT_TRACKED' : 'TRACKED') as 'NOT_TRACKED' | 'TRACKED',
             systemType: productType,
             vendorId: vendor.id,
             vendorName: vendor.name,
@@ -1463,6 +1462,8 @@ const Products = () => {
 const ProductFormModal = ({ product, categories, vendors, onSave, onClose, defaultGst, isSaving }: { product: Product | null; categories: string[]; vendors: Vendor[]; onSave: (p: any, file?: File | null) => void; onClose: () => void; defaultGst: number; isSaving?: boolean; }) => {
   const [formData, setFormData] = useState({
     id: product?.id || null, name: product?.name || '', category: product?.category || categories[0] || '',
+    brand: product?.brand || '',
+    sku: product?.sku || '',
     series: product?.series || '',
     purchaseRate: product?.purchaseRate || 0, purchaseGst: product?.purchaseGst ?? defaultGst,
     purchaseDisc: product?.purchaseDisc || 0,
@@ -1472,6 +1473,9 @@ const ProductFormModal = ({ product, categories, vendors, onSave, onClose, defau
     vendorId: product?.vendorId || (vendors[0]?.id || ''), vendorName: product?.vendorName || (vendors[0]?.name || ''),
     vendorNickname: product?.vendorNickname || (vendors[0]?.nickname || vendors[0]?.name || ''),
     barcode: product?.barcode || '',
+    batchNumber: product?.batchNumber || '',
+    expiryDate: product?.expiryDate || '',
+    unit: product?.unit || '',
     createdAt: product?.createdAt || new Date().toISOString().split('T')[0],
     availabilityStatus: product?.availabilityStatus || 'AVAILABLE',
     inventoryTracking: product?.inventoryTracking || 'NOT_TRACKED'
@@ -1599,7 +1603,6 @@ const ProductFormModal = ({ product, categories, vendors, onSave, onClose, defau
           </div>
           {formData.barcode && (
             <div className="p-4 bg-gray-50 rounded-md flex justify-center">
-              {/* @ts-ignore */}
               <Barcode value={formData.barcode} height={50} />
             </div>
           )}

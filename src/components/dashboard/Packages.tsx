@@ -10,7 +10,7 @@ export default function Packages() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPackage, setEditingPackage] = useState<SalonPackage | null>(null);
-  const confirm = useConfirm();
+  const { confirm, ConfirmationDialog } = useConfirm();
 
   const filteredPackages = packages.filter(p => 
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -27,9 +27,8 @@ export default function Packages() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    const isConfirmed = await confirm("Are you sure you want to delete this package?");
-    if (isConfirmed) {
+  const handleDelete = (id: string) => {
+    confirm("Are you sure you want to delete this package?", async () => {
       try {
         await packageApi.delete(id);
         toast.success("Package deleted");
@@ -37,7 +36,7 @@ export default function Packages() {
       } catch (err) {
         toast.error("Failed to delete package");
       }
-    }
+    }, "Delete Package");
   };
 
   return (
@@ -135,6 +134,7 @@ export default function Packages() {
           }} 
         />
       )}
+      <ConfirmationDialog />
     </div>
   );
 }

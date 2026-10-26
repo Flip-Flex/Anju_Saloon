@@ -90,7 +90,7 @@ const Reports = () => {
   /** Match billing barcode/id normalization (MSRE/MSWS prefixes, leading zeros). */
   const normalizeProductKey = (val?: string): string => {
     if (!val) return '';
-    return val.toUpperCase().replace(/^MSRE|^MSWS|^0+/, '').trim();
+    return val.toUpperCase().replace(/^ANJU|^MSRE|^MSWS|^0+/, '').trim();
   };
 
   const isBillExcludedFromStockDeduction = (bill: Bill): boolean => {
@@ -536,12 +536,12 @@ const Reports = () => {
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
           .map(a => ({
             'S.No': serial++,
-            Date: new Date(a.date).toLocaleDateString('en-GB'),
-            Time: a.startTime + ' - ' + a.endTime,
-            Customer: a.customerName,
-            Service: a.serviceName,
+            Date: a.date ? new Date(a.date).toLocaleDateString('en-GB') : '-',
+            Time: (a.startTime ? `${a.startTime}${a.endTime ? ' - ' + a.endTime : ''}` : a.time) || '-',
+            Customer: a.customerName || '-',
+            Service: a.serviceName || (Array.isArray(a.serviceNames) && a.serviceNames.length > 0 ? a.serviceNames.join(', ') : (a.serviceIds?.length ? `${a.serviceIds.length} service(s)` : '-')),
             Staff: a.staffName || '-',
-            Status: a.status
+            Status: a.status || 'SCHEDULED'
           }));
         setData(apptData);
       } else if (activeTab === 'customers') {
@@ -623,17 +623,6 @@ const Reports = () => {
           </button>
         </h1>
         <div className="flex gap-3">
-          <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
-            {['All', 'Retail'].map((type) => (
-              <button
-                key={type}
-                onClick={() => setSystemTypeFilter(type as SystemType)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${systemTypeFilter === type ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
-              >
-                {type.toUpperCase()}
-              </button>
-            ))}
-          </div>
           <button onClick={() => setShowCancelledModal(true)} className="px-3 py-1.5 text-sm text-sm bg-red-600 text-white rounded-lg flex items-center gap-2 hover:bg-red-700">
             <Filter size={18} /> View Cancelled
           </button>

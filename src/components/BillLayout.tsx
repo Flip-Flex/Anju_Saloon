@@ -31,6 +31,8 @@ interface PrintableBillItem {
   netAmount?: number;
   total?: number;
   totalLine?: number;
+  type?: 'PRODUCT' | 'SERVICE' | string;
+  staffName?: string;
 }
 
 interface PrintableBillData {
@@ -139,7 +141,7 @@ export const BillLayout: React.FC<{ data: PrintableBillData }> = ({ data }) => {
   const grandTotal = Math.round(finalAmount);
   const roundOffAmount = grandTotal - finalAmount;
   const amountPaid = Number(data.amountPaid ?? grandTotal) || 0;
-  const billTitle = data.status === "RETURNED" ? "RETURN / EXCHANGE" : (withGst ? "TAX INVOICE" : "ESTIMATE / BILL");
+  const billTitle = data.status === "RETURNED" ? "RETURN / EXCHANGE" : (withGst ? "TAX INVOICE (GST INCLUSIVE)" : "ESTIMATE / BILL");
 
 
   return (
@@ -152,6 +154,7 @@ export const BillLayout: React.FC<{ data: PrintableBillData }> = ({ data }) => {
           <p style={{ margin: 0 }}>{APP_CONFIG.ADDRESS_LINE_2}</p>
           <p style={{ margin: 0 }}>Ph: {APP_CONFIG.CONTACT_NO}</p>
           <p style={{ margin: 0 }}>GSTIN: {APP_CONFIG.GSTIN}</p>
+          <p style={{ margin: '2px 0 0 0', fontSize: '7.5pt', fontWeight: 'bold' }}>[ ALL PRICES ARE INCLUSIVE OF GST ]</p>
         </div>
 
         <div className="sep-single"></div>
@@ -295,7 +298,7 @@ export const BillLayout: React.FC<{ data: PrintableBillData }> = ({ data }) => {
                       <td className="text-right">₹{(sgstAmount || 0).toFixed(2)}</td>
                     </tr>
                     <tr>
-                      <td className="text-left" style={{ fontWeight: 'bold' }}>TOTAL GST {amountBeforeGst > 0 ? ((totalGstForBill || 0) / amountBeforeGst * 100).toFixed(1) : '0'}%</td>
+                      <td className="text-left" style={{ fontWeight: 'bold' }}>TOTAL GST (INCLUDED) {amountBeforeGst > 0 ? ((totalGstForBill || 0) / amountBeforeGst * 100).toFixed(1) : '0'}%</td>
                       <td className="text-right" style={{ fontWeight: 'bold' }}>₹{(totalGstForBill || 0).toFixed(2)}</td>
                     </tr>
                   </>

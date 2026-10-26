@@ -3,6 +3,7 @@ import * as React from 'react';
 import './WholesaleBillLayout.css';
 import { APP_CONFIG } from '@/config';
 import { numberToWords } from '@/utils/numberToWords';
+import { useGlobalData } from '@/context/GlobalDataContext';
 
 interface PrintableBillItem {
     barcode?: string;
@@ -54,10 +55,22 @@ interface PrintableBillData {
 }
 
 export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ data }) => {
-    // Standard slots to ensure vertical fit
-    const SAFE_LIMIT = 15; // Max items on last page with footer
-    const HARD_LIMIT = 25; // Max items on intermediate pages without footer
-    const HSN_SLOTS = 3;
+    const { settings: globalSettings } = useGlobalData();
+    const activeSettings = globalSettings || (data as any).settings || {};
+
+    const shopName = activeSettings.shopName || APP_CONFIG.COMPANY_NAME;
+    const addressLine1 = activeSettings.addressLine1 || APP_CONFIG.ADDRESS_LINE_1;
+    const addressLine2 = activeSettings.addressLine2 || APP_CONFIG.ADDRESS_LINE_2;
+    const contactNo = activeSettings.contactNo || APP_CONFIG.CONTACT_NO;
+    const gstin = activeSettings.gstNumber || APP_CONFIG.GSTIN;
+    const bankName = activeSettings.bankName || APP_CONFIG.BANK_NAME;
+    const accountNo = activeSettings.accountNo || APP_CONFIG.ACCOUNT_NO;
+    const ifscCode = activeSettings.ifscCode || APP_CONFIG.IFSC_CODE;
+    const billMessage = activeSettings.billMessage || `Thank you for visiting ${shopName}! All taxes inclusive.`;
+
+    // Dynamic slots to ensure bill strictly fits on a single page
+    const SAFE_LIMIT = 12; // Max items on last page with footer
+    const HARD_LIMIT = 20; // Max items on intermediate pages without footer
 
     const billNo = data.id || data.invoiceId || data.invoiceNumber || "";
     const customerName = data.customerName || data.partyName || "CASH";
@@ -83,6 +96,7 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
         return {
             id: item.productId || item.barcode || "-",
             name: item.productName || item.name || item.particulars || "-",
+            productName: item.productName || item.name || item.particulars || "-",
             qty: q,
             rate: p,
             discount: d,
@@ -90,7 +104,9 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
             gstPercent: g,
             gstAmount: ga,
             total: total,
-            hsn: item.hsn || "9997"
+            hsn: item.hsn || "9997",
+            type: (item as any).type,
+            staffName: (item as any).staffName
         };
     });
 
@@ -110,6 +126,8 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
     }, {} as Record<number, any>);
 
     const gstRows = Object.values(gstGroups);
+    // Pad to minimum 1 row so table header/footer aligns cleanly, but avoid unnecessary vertical expansion
+    const HSN_SLOTS = Math.max(gstRows.length, 1);
     const paddedGstRows = [...gstRows];
     while (paddedGstRows.length < HSN_SLOTS) {
         paddedGstRows.push(null as any);
@@ -126,7 +144,12 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
             // Final page with footer
             const pageItems = items.slice(currentIndex);
             const paddedItems = [...pageItems];
-            while (paddedItems.length < SAFE_LIMIT) paddedItems.push(null as any);
+            // Only add minimal padding (min 3 rows) so single items aren't microscopic,
+            // but NEVER pad up to 15 rows to prevent spilling into a 2nd page
+            const minRows = Math.min(Math.max(pageItems.length, 3), 5);
+            while (paddedItems.length < minRows) {
+                paddedItems.push(null as any);
+            }
 
             pages.push({
                 items: paddedItems,
@@ -139,7 +162,10 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
             const takeCount = Math.min(remainingCount, HARD_LIMIT);
             const pageItems = items.slice(currentIndex, currentIndex + takeCount);
             const paddedItems = [...pageItems];
-            while (paddedItems.length < HARD_LIMIT) paddedItems.push(null as any);
+            const minRows = Math.min(Math.max(pageItems.length, 6), HARD_LIMIT);
+            while (paddedItems.length < minRows) {
+                paddedItems.push(null as any);
+            }
 
             pages.push({
                 items: paddedItems,
@@ -162,24 +188,26 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
                     {/* COMPANY BOX */}
                     <div className="company-details-box">
                         <div className="company-top-labels">
-                            <span className="label-left">{isEstimate ? "ESTIMATION" : "SALON RECEIPT"}</span>
-                            <span className="label-center"></span>
+                            <span className="label-left">{isEstimate ? "ESTIMATION" : "TAX INVOICE (GST INCLUSIVE)"}</span>
+                            <span className="label-center" style={{ fontSize: '8pt', fontWeight: 'bold', color: '#166534', background: '#dcfce7', padding: '1.5px 8px', borderRadius: '4px', letterSpacing: '0.5px' }}>
+                                ALL PRICES ARE INCLUSIVE OF GST
+                            </span>
                             <span className="label-right">CUSTOMER COPY</span>
                         </div>
                         <div className="company-middle-row">
                             <div className="spacer"></div>
                             <div className="company-name-section">
-                                <h1 className="shop-name">{APP_CONFIG.COMPANY_NAME}</h1>
-                                <p className="shop-address">{APP_CONFIG.ADDRESS_LINE_1}</p>
-                                <p className="shop-address">{APP_CONFIG.ADDRESS_LINE_2}</p>
+                                <h1 className="shop-name">{shopName}</h1>
+                                <p className="shop-address">{addressLine1}</p>
+                                <p className="shop-address">{addressLine2}</p>
                             </div>
                             <div className="company-info-right">
-                                <p>GSTIN: {APP_CONFIG.GSTIN}</p>
-                                <p>PH: {APP_CONFIG.CONTACT_NO}</p>
+                                <p>GSTIN: {gstin}</p>
+                                <p>PH: {contactNo}</p>
                             </div>
                         </div>
                         <div className="company-bottom-row">
-                            STATE CODE: 33
+                            STATE CODE: 33 &bull; INCLUSIVE OF ALL TAXES
                         </div>
                     </div>
 
@@ -188,20 +216,20 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
                         <tbody>
                             <tr>
                                 <td className="billed-to-section">
-                                    <div style={{ fontWeight: 'bold', borderBottom: '1px solid black', marginBottom: '1.5mm', fontSize: '9.5pt' }}>BILLED TO / SHIPPED TO</div>
-                                    <div style={{ fontWeight: '900', fontSize: '13pt', textTransform: 'uppercase' }}>{customerName}</div>
-                                    <div style={{ fontSize: '10.2pt', whiteSpace: 'pre-wrap', marginTop: '1.5mm' }}>{customerAddress}</div>
-                                    <div style={{ fontSize: '10.2pt', marginTop: '1.5mm' }}>PH: {customerPhone}</div>
-                                    {customerGst && <div style={{ fontSize: '10.2pt', fontWeight: 'bold', marginTop: '1.5mm' }}>GSTIN: {customerGst}</div>}
+                                    <div style={{ fontWeight: 'bold', borderBottom: '1px solid black', marginBottom: '1mm', fontSize: '8.5pt' }}>BILLED TO / SHIPPED TO</div>
+                                    <div style={{ fontWeight: '900', fontSize: '11.5pt', textTransform: 'uppercase' }}>{customerName}</div>
+                                    {customerAddress && <div style={{ fontSize: '9pt', whiteSpace: 'pre-wrap', marginTop: '1mm' }}>{customerAddress}</div>}
+                                    <div style={{ fontSize: '9pt', marginTop: '1mm' }}>PH: {customerPhone || "N/A"}</div>
+                                    {customerGst && <div style={{ fontSize: '9pt', fontWeight: 'bold', marginTop: '1mm' }}>GSTIN: {customerGst}</div>}
                                 </td>
                                 <td className="invoice-info-section">
                                     <div className="invoice-info-split">
                                         <div className="info-box-top">
-                                            <div style={{ fontSize: '10.5pt' }}>Invoice No: <b style={{ fontSize: '12pt' }}>{billNo}</b></div>
-                                            <div style={{ fontSize: '10.5pt', marginTop: '2.5mm' }}>Date: <b style={{ fontSize: '12pt' }}>{formattedDate}</b></div>
+                                            <div style={{ fontSize: '9.5pt' }}>Invoice No: <b style={{ fontSize: '11pt' }}>{billNo}</b></div>
+                                            <div style={{ fontSize: '9.5pt', marginTop: '1.5mm' }}>Date: <b style={{ fontSize: '11pt' }}>{formattedDate}</b></div>
                                         </div>
-                                        <div className="info-box-bottom" style={{ fontSize: '10pt' }}>
-                                            <div>Mode: {data.invoiceMode === "ESTIMATE" ? "Estimation" : "Tax Invoice"}</div>
+                                        <div className="info-box-bottom" style={{ fontSize: '9pt' }}>
+                                            <div>Mode: {data.invoiceMode === "ESTIMATE" ? "Estimation" : "Tax Invoice (GST Inclusive)"}</div>
                                             <div>Terminal: POS 1</div>
                                         </div>
                                     </div>
@@ -216,11 +244,11 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
                             <thead>
                                 <tr>
                                     <th className="sno-col">S.No</th>
-                                    <th className="desc-col">Service / Product</th>
+                                    <th className="desc-col">Service / Product Description</th>
                                     <th className="qty-col">Qty</th>
-                                    <th className="rate-col">Rate</th>
+                                    <th className="rate-col">Rate (Incl. GST)</th>
                                     <th className="disc-col">Disc</th>
-                                    <th className="amt-col">Taxable</th>
+                                    <th className="amt-col">Amount (Incl. GST)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -230,28 +258,29 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
                                         <td className="text-left">
                                             {item ? (
                                                 <>
-                                                    <div>{item.productName || item.name}</div>
-                                                    {item.type === 'SERVICE' && (
-                                                        <div style={{ fontSize: '8pt', color: '#555', marginTop: '2px' }}>
-                                                            Staff: {item.staffName || 'Any'}
-                                                        </div>
-                                                    )}
+                                                    <div style={{ fontWeight: 'bold' }}>{item.productName || item.name}</div>
+                                                    <div style={{ fontSize: '7.5pt', color: '#555', marginTop: '1px' }}>
+                                                        <span>Taxable: ₹{item.baseAmount.toFixed(2)} | GST ({item.gstPercent}%): ₹{item.gstAmount.toFixed(2)}</span>
+                                                        {item.type === 'SERVICE' && item.staffName && (
+                                                            <span style={{ marginLeft: '6px', color: '#1d4ed8' }}>&bull; Staff: {item.staffName}</span>
+                                                        )}
+                                                    </div>
                                                 </>
                                             ) : ""}
                                         </td>
                                         <td className="text-center">{item ? item.qty : ""}</td>
                                         <td className="text-right">{item ? item.rate.toFixed(2) : ""}</td>
                                         <td className="text-right">{item ? (item.discount || 0).toFixed(2) : ""}</td>
-                                        <td className="text-right">{item ? item.baseAmount.toFixed(2) : ""}</td>
+                                        <td className="text-right" style={{ fontWeight: 'bold' }}>{item ? item.total.toFixed(2) : ""}</td>
                                     </tr>
                                 ))}
                                 {page.showFooter && (
                                     <tr className="total-row">
-                                        <td colSpan={2} className="text-right" style={{ paddingRight: '5mm' }}>TOTAL</td>
+                                        <td colSpan={2} className="text-right" style={{ paddingRight: '5mm', fontWeight: 'bold' }}>TOTAL (INCL. GST)</td>
                                         <td className="text-center">{totalQty}</td>
                                         <td></td>
                                         <td className="text-right">{items.reduce((sum, i) => sum + (i.discount || 0), 0).toFixed(2)}</td>
-                                        <td className="text-right">{totalBaseAmount.toFixed(2)}</td>
+                                        <td className="text-right" style={{ fontWeight: 'bold' }}>{items.reduce((sum, i) => sum + i.total, 0).toFixed(2)}</td>
                                     </tr>
                                 )}
                             </tbody>
@@ -261,6 +290,9 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
                     {/* TAX & FOOTER SECTION - ONLY ON LAST PAGE */}
                     {page.showFooter && (
                         <div className="footer-reserved-area">
+                            <div style={{ fontSize: '8pt', fontWeight: 'bold', color: '#475569', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                GST Tax Breakdown (Included in Net Bill Amount)
+                            </div>
                             <div className="hsn-summary-box">
                                 <div className="hsn-left">
                                     <table className="hsn-table">
@@ -329,26 +361,34 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
                                     <table className="summary-table">
                                         <tbody>
                                             <tr>
+                                                <td style={{ fontWeight: '600' }}>Bill Total (Incl. GST):</td>
+                                                <td className="text-right" style={{ fontWeight: 'bold' }}>₹{items.reduce((sum, i) => sum + i.total, 0).toFixed(2)}</td>
+                                            </tr>
+                                            <tr style={{ color: '#555', fontSize: '9pt' }}>
                                                 <td>Taxable Value:</td>
                                                 <td className="text-right">₹{totalBaseAmount.toFixed(2)}</td>
                                             </tr>
                                             {taxType === "INTER_STATE" ? (
-                                                <tr>
-                                                    <td>IGST:</td>
+                                                <tr style={{ color: '#555', fontSize: '9pt' }}>
+                                                    <td>IGST (Included):</td>
                                                     <td className="text-right">₹{totalGst.toFixed(2)}</td>
                                                 </tr>
                                             ) : (
                                                 <>
-                                                    <tr>
-                                                        <td>CGST:</td>
+                                                    <tr style={{ color: '#555', fontSize: '9pt' }}>
+                                                        <td>CGST (Included):</td>
                                                         <td className="text-right">₹{(totalGst / 2).toFixed(2)}</td>
                                                     </tr>
-                                                    <tr>
-                                                        <td>SGST:</td>
+                                                    <tr style={{ color: '#555', fontSize: '9pt' }}>
+                                                        <td>SGST (Included):</td>
                                                         <td className="text-right">₹{(totalGst / 2).toFixed(2)}</td>
                                                     </tr>
                                                 </>
                                             )}
+                                            <tr style={{ color: '#166534', fontWeight: 'bold', fontSize: '9pt', borderTop: '1px dashed #cbd5e1' }}>
+                                                <td>Total Tax Included:</td>
+                                                <td className="text-right">₹{totalGst.toFixed(2)}</td>
+                                            </tr>
                                             {((data as any).loyaltyDiscount || 0) > 0 && (
                                                 <tr>
                                                     <td>Loyalty Discount:</td>
@@ -368,12 +408,13 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
                             <div className="signature-section">
                                 <div className="bank-info">
                                     <div style={{ fontWeight: 'bold', textDecoration: 'underline', marginBottom: '2.5mm' }}>Bank Details:</div>
-                                    <div>Bank: <b>{APP_CONFIG.BANK_NAME}</b></div>
-                                    <div>A/C No: <b>{APP_CONFIG.ACCOUNT_NO}</b></div>
-                                    <div>IFSC: <b>{APP_CONFIG.IFSC_CODE}</b></div>
+                                    <div>Bank: <b>{bankName}</b></div>
+                                    <div>A/C No: <b>{accountNo}</b></div>
+                                    <div>IFSC: <b>{ifscCode}</b></div>
+                                    <div style={{ fontSize: '8pt', color: '#64748b', marginTop: '2mm' }}>* All rates are inclusive of GST</div>
                                 </div>
                                 <div className="sign-box">
-                                    <div className="sign-top">For {APP_CONFIG.COMPANY_NAME}</div>
+                                    <div className="sign-top">For {shopName}</div>
                                     <div className="sign-bottom">
                                         <div className="eo-text">E & O.E</div>
                                         <div className="auth-text">Authorised Signatory</div>
@@ -385,7 +426,7 @@ export const WholesaleBillLayout: React.FC<{ data: PrintableBillData }> = ({ dat
 
                     {/* FOOTER YELLOW BAND */}
                     <div className="footer-yellow-band">
-                        <div className="jurisdiction-text">Thank you for visiting!</div>
+                        <div className="jurisdiction-text">{billMessage}</div>
                         <div className="page-indicator">Page {pageIdx + 1} of {totalPages}</div>
                     </div>
                 </div>

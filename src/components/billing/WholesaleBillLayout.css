@@ -2,8 +2,8 @@
 
 @media print {
     @page {
-        size: 210mm auto;
-        margin: 0mm !important;
+        size: A4 portrait;
+        margin: 4mm 6mm !important;
     }
 
     html, body {
@@ -11,6 +11,8 @@
         padding: 0 !important;
         height: auto !important;
         background: white !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
     }
 
     body * {
@@ -27,29 +29,44 @@
     }
 
     .print-container {
-        width: 100%;
+        width: 100% !important;
         margin: 0 !important;
         padding: 0 !important;
-        display: flex !important;
-        justify-content: center !important;
+        display: block !important;
     }
 
     .wholesale-bill-wrapper {
-        width: 210mm !important;
-        margin: 0 !important;
+        width: 100% !important;
+        max-width: 198mm !important;
+        margin: 0 auto !important;
         padding: 0 !important;
         background: white !important;
         box-shadow: none !important;
         display: block !important;
+        page-break-after: avoid !important;
+        break-after: avoid !important;
     }
 
     .wholesale-page {
-        overflow: visible !important;
-        page-break-after: always !important;
+        width: 100% !important;
+        height: auto !important;
+        max-height: 285mm !important;
+        padding: 2mm 0mm !important;
+        box-sizing: border-box !important;
+        display: flex !important;
+        flex-direction: column !important;
+        position: relative !important;
+        overflow: hidden !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        page-break-after: auto !important;
+        break-after: auto !important;
+        background: white !important;
     }
 
     .wholesale-page:last-child {
-        page-break-after: auto !important;
+        page-break-after: avoid !important;
+        break-after: avoid !important;
     }
 }
 
@@ -64,20 +81,22 @@
         margin: 0 auto;
         background: white;
         font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        font-size: 10.5pt; /* Reduced from 11pt */
+        font-size: 9.5pt;
         color: #000;
         box-sizing: border-box;
     }
 
     .wholesale-page {
         width: 100%;
-        height: 297mm;
-        padding: 4mm 8mm; /* Reduced top padding */
+        height: auto;
+        min-height: 240mm;
+        max-height: 295mm;
+        padding: 3mm 6mm;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
         position: relative;
-        overflow: hidden; /* Changed back to hidden to enforce single page */
+        overflow: hidden;
         page-break-after: always;
         background: white;
         box-shadow: none;
@@ -89,7 +108,7 @@
 
     /* Yellow Header Band */
     .header-yellow-band {
-        height: 4mm; /* Reduced from 5mm */
+        height: 3.5mm;
         background-color: var(--invoice-yellow) !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -116,7 +135,7 @@
         padding: 1mm 3mm;
         font-weight: bold;
         text-transform: uppercase;
-        font-size: 9.5pt;
+        font-size: 8.5pt;
         border-bottom: 1px solid var(--border-color);
         background-color: var(--invoice-yellow) !important;
         -webkit-print-color-adjust: exact;
@@ -124,13 +143,13 @@
     }
 
     .label-left { text-align: left; }
-    .label-center { text-align: center; font-size: 10.5pt; }
+    .label-center { text-align: center; font-size: 9.5pt; }
     .label-right { text-align: right; }
 
     .company-middle-row {
         display: grid;
         grid-template-columns: 20% 55% 25%;
-        padding: 1.5mm 3mm;
+        padding: 1mm 3mm;
         align-items: center;
     }
 
@@ -139,7 +158,7 @@
     }
 
     .shop-name {
-        font-size: 18pt; /* Reduced from 20pt */
+        font-size: 16pt;
         font-weight: 900;
         margin: 0;
         text-transform: uppercase;
@@ -147,20 +166,20 @@
     }
 
     .shop-address {
-        font-size: 9pt;
+        font-size: 8.5pt;
         margin: 0.5mm 0 0;
-        line-height: 1.1;
+        line-height: 1.15;
     }
 
     .company-info-right {
         text-align: right;
-        font-size: 8.5pt;
+        font-size: 8pt;
         font-weight: bold;
     }
 
     .company-bottom-row {
-        padding: 0 3mm 1.5mm;
-        font-size: 9pt;
+        padding: 0 3mm 1mm;
+        font-size: 8pt;
         font-weight: bold;
     }
 
@@ -175,7 +194,7 @@
 
     .customer-invoice-table td {
         border: 1px solid var(--border-color);
-        padding: 1.5mm 3mm;
+        padding: 1.2mm 2.5mm;
         vertical-align: top;
     }
 
@@ -190,12 +209,12 @@
 
     .info-box-top {
         border-bottom: 1px solid var(--border-color);
-        padding: 1.5mm 3mm;
+        padding: 1.2mm 2.5mm;
         flex: 1;
     }
 
     .info-box-bottom {
-        padding: 1.5mm 3mm;
+        padding: 1.2mm 2.5mm;
         flex: 1;
     }
 
@@ -220,10 +239,10 @@
 
     .product-table th {
         border-right: 1px solid var(--border-color);
-        padding: 2mm 1mm;
+        padding: 1.5mm 1mm;
         background: white;
         font-weight: bold;
-        font-size: 9.5pt;
+        font-size: 8.5pt;
         text-transform: uppercase;
     }
 
@@ -232,8 +251,8 @@
     .product-table td {
         border-right: 1px solid var(--border-color);
         padding: 1mm 2mm;
-        font-size: 10.5pt;
-        height: 7.5mm; /* Reduced from 8.5mm */
+        font-size: 9pt;
+        height: 6mm;
         box-sizing: border-box;
     }
 
@@ -246,6 +265,8 @@
         border-bottom: 1px solid var(--border-color);
         font-weight: bold;
         background: white;
+        padding: 1.5mm 2mm;
+        font-size: 9.5pt;
     }
 
     .text-left { text-align: left !important; }
@@ -253,11 +274,11 @@
     .text-center { text-align: center !important; }
 
     .sno-col { width: 8%; }
-    .id-col { width: 18%; }
-    .desc-col { width: 42%; }
+    .desc-col { width: 44%; }
     .qty-col { width: 8%; }
-    .rate-col { width: 12%; }
-    .amt-col { width: 12%; }
+    .rate-col { width: 14%; }
+    .disc-col { width: 10%; }
+    .amt-col { width: 16%; }
 
     /* HSN/SAC Table */
     .hsn-summary-box {
@@ -266,7 +287,7 @@
         width: 100%;
         border: 1px solid var(--border-color);
         margin-top: -1px;
-        min-height: 28mm; /* Reduced from 32mm */
+        min-height: 18mm;
         box-sizing: border-box;
         background: white;
     }
@@ -289,10 +310,10 @@
 
     .hsn-table th, .hsn-table td {
         border-right: 1px solid var(--border-color);
-        padding: 1mm 1mm;
-        font-size: 8pt;
+        padding: 0.8mm 1mm;
+        font-size: 7.5pt;
         text-align: center;
-        height: 6mm;
+        height: 5mm;
         box-sizing: border-box;
     }
 
@@ -318,8 +339,8 @@
     }
 
     .summary-table td {
-        padding: 1.5mm 3mm;
-        font-size: 9.5pt;
+        padding: 1mm 2.5mm;
+        font-size: 8.5pt;
         border-bottom: 1px solid var(--border-color);
     }
 
@@ -330,20 +351,20 @@
         display: flex;
         border: 1px solid var(--border-color);
         margin-top: -1px;
-        padding: 2mm 3mm;
+        padding: 1.5mm 3mm;
         justify-content: space-between;
         align-items: center;
         background: white;
     }
 
     .amount-in-words {
-        font-size: 9.5pt;
+        font-size: 8.5pt;
         font-style: italic;
     }
 
     .net-amount-label {
         font-weight: 900;
-        font-size: 13pt;
+        font-size: 11.5pt;
     }
 
     /* Footer Sections */
@@ -358,26 +379,26 @@
         display: flex;
         border: 1px solid var(--border-color);
         margin-top: -1px;
-        min-height: 24mm; /* Reduced from 28mm */
+        min-height: 18mm;
     }
 
     .bank-info {
         width: 60%;
-        padding: 2.5mm 3mm;
-        font-size: 9.5pt;
+        padding: 1.5mm 3mm;
+        font-size: 8.5pt;
         border-right: 1px solid var(--border-color);
     }
 
     .sign-box {
         width: 40%;
-        padding: 2.5mm 3mm;
+        padding: 1.5mm 3mm;
         text-align: right;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
     }
 
-    .sign-top { font-weight: bold; font-size: 10.5pt; }
+    .sign-top { font-weight: bold; font-size: 9.5pt; }
     .sign-bottom {
         display: flex;
         justify-content: space-between;
@@ -385,12 +406,12 @@
         padding-top: 1mm;
     }
 
-    .eo-text { font-size: 8pt; font-weight: bold; }
-    .auth-text { font-size: 9.5pt; font-weight: bold; }
+    .eo-text { font-size: 7.5pt; font-weight: bold; }
+    .auth-text { font-size: 9pt; font-weight: bold; }
 
     /* Footer Yellow Band */
     .footer-yellow-band {
-        height: 6mm;
+        height: 5mm;
         background-color: var(--invoice-yellow) !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -405,7 +426,7 @@
     }
 
     .jurisdiction-text {
-        font-size: 9pt;
+        font-size: 8pt;
         font-weight: bold;
         text-transform: uppercase;
         color: black;
@@ -414,27 +435,8 @@
     .page-indicator {
         position: absolute;
         right: 4mm;
-        font-size: 8.5pt;
+        font-size: 8pt;
         font-weight: bold;
         color: black;
-    }
-}
-
-@media print {
-    body {
-        margin: 0 !important;
-        padding: 0 !important;
-        background: white !important;
-    }
-
-    .wholesale-bill-wrapper {
-        width: 210mm;
-        margin: 0;
-        padding: 0;
-    }
-
-    @page {
-        size: A4 portrait;
-        margin: 0;
     }
 }

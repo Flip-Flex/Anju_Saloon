@@ -3,9 +3,8 @@ import toast from 'react-hot-toast';
 import {
     Plus, Search, Trash2, Edit2, User, Phone, Calendar as CalendarIcon,
     CheckCircle, XCircle, Clock, ChevronLeft, ChevronRight, Loader2,
-
     FileText, UploadCloud, DollarSign, Timer, Users, Briefcase, CreditCard, Shield, Activity,
-    UserCheck, Save, Edit3
+    UserCheck, Save, Edit3, Key, Lock, Mail
 } from 'lucide-react';
 import { staffApi, Staff, Attendance, Role, Commission, billingApi } from '@/lib/api';
 import {
@@ -17,8 +16,9 @@ import { useCachedResource } from '@/hooks/useCachedResource';
 import { SyncIndicator } from '@/components/SyncIndicator';
 import StaffSalaryView from './StaffSalaryView';
 import ConfirmPaymentModal from './ConfirmPaymentModal';
-
-// Firebase storage imports removed
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { createStaffAuthAccount } from '@/lib/authHelper';
 import { useConfirm } from '@/hooks/useConfirm';
 
 const StaffManagement = () => {
@@ -567,8 +567,13 @@ const DirectoryView = ({ staff, loading, searchTerm, setSearchTerm, onRefresh, o
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <div className="font-semibold text-gray-900 truncate">{s.name}</div>
-                                        <div className="text-xs text-gray-500 flex items-center gap-1">
-                                            <Briefcase size={10} /> {s.role}
+                                        <div className="text-xs text-gray-500 flex items-center gap-2">
+                                            <span className="flex items-center gap-1"><Briefcase size={10} /> {s.role}</span>
+                                            {s.hasLoginAccount && (
+                                                <span className="text-emerald-600 font-medium flex items-center gap-0.5" title="ERP Login Active">
+                                                    <Key size={10} /> Active
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                     {selectedStaff?.id === s.id && <ChevronRight size={16} className="text-blue-400" />}
@@ -596,8 +601,16 @@ const DirectoryView = ({ staff, loading, searchTerm, setSearchTerm, onRefresh, o
                                     )}
                                     <div>
                                         <h1 className="text-2xl font-bold text-gray-900">{selectedStaff.name}</h1>
-                                        <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
+                                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 mt-1">
                                             <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold uppercase">{selectedStaff.role}</span>
+                                            {selectedStaff.hasLoginAccount && (
+                                                <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1">
+                                                    <Key size={10} /> ERP Login
+                                                </span>
+                                            )}
+                                            {selectedStaff.email && (
+                                                <span className="text-xs text-gray-500 font-mono">({selectedStaff.email})</span>
+                                            )}
                                             <span>•</span>
                                             <span>ID: {selectedStaff.id.substring(0, 6)}</span>
                                         </div>
@@ -1209,10 +1222,13 @@ const StaffCalendarModal = ({ staff, onClose }: { staff: Staff, onClose: () => v
 // --- STAFF FORM MODAL ---
 const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
     const [formData, setFormData] = useState({
-        name: '', phone: '', emergencyPhone: '', role: 'Employee',
+        name: '', email: '', phone: '', emergencyPhone: '', role: 'Employee',
         baseSalary: 10000, allowedPermHours: 2.0, profilePicUrl: '', isActive: true,
-        accountNumber: '', ifscCode: '', commissionPercentage: 0
+        accountNumber: '', ifscCode: '', commissionPercentage: 0,
+        hasLoginAccount: false, authUid: ''
     });
+    const [enableLogin, setEnableLogin] = useState(false);
+    const [loginPassword, setLoginPassword] = useState('');
 
     const nameRef = useRef<HTMLInputElement>(null);
     const phoneRef = useRef<HTMLInputElement>(null);
@@ -1238,12 +1254,14 @@ const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
         fetchRoles();
         if (staff) {
             setFormData({
-                name: staff.name, phone: staff.phone, emergencyPhone: staff.emergencyPhone || '',
+                name: staff.name, email: staff.email || '', phone: staff.phone, emergencyPhone: staff.emergencyPhone || '',
                 role: staff.role || 'Employee', baseSalary: staff.baseSalary || 10000,
                 allowedPermHours: staff.allowedPermHours || 2.0, profilePicUrl: staff.profilePicUrl || '', isActive: staff.isActive,
                 accountNumber: staff.accountNumber || '', ifscCode: staff.ifscCode || '',
-                commissionPercentage: staff.commissionPercentage || 0
+                commissionPercentage: staff.commissionPercentage || 0,
+                hasLoginAccount: !!staff.hasLoginAccount, authUid: staff.authUid || ''
             });
+            setEnableLogin(!!staff.hasLoginAccount || staff.role === 'Admin' || staff.role === 'Cashier');
         }
     }, [staff]);
 
@@ -1251,12 +1269,52 @@ const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
         e.preventDefault();
         setIsSaving(true);
         try {
-            if (staff) await staffApi.update(staff.id, formData);
-            else await staffApi.add(formData);
-            toast.success("Saved successfully");
+            if (enableLogin && !formData.email) {
+                toast.error("Please provide an email address for ERP login.");
+                setIsSaving(false);
+                return;
+            }
+            if (enableLogin && !staff?.hasLoginAccount && (!loginPassword || loginPassword.length < 6)) {
+                toast.error("Please provide an initial password of at least 6 characters.");
+                setIsSaving(false);
+                return;
+            }
+
+            let savedStaffId = staff?.id;
+            if (staff) {
+                await staffApi.update(staff.id, formData);
+            } else {
+                const addRes: any = await staffApi.add(formData);
+                savedStaffId = addRes?.data?.id || addRes?.id;
+            }
+
+            // Create Firebase Auth login account if requested and password supplied
+            if (enableLogin && loginPassword && loginPassword.length >= 6) {
+                const authRole = formData.role === 'Admin' ? 'Admin' : 'Cashier';
+                const authRes = await createStaffAuthAccount(
+                    formData.email,
+                    loginPassword,
+                    authRole,
+                    savedStaffId
+                );
+                if (!authRes.success) {
+                    toast.error(`Staff saved, but Auth account failed: ${authRes.error}`);
+                } else {
+                    if (savedStaffId) {
+                        await staffApi.update(savedStaffId, { hasLoginAccount: true, authUid: authRes.uid });
+                    }
+                    toast.success(`ERP login provisioned for ${formData.email} (${authRole})`);
+                }
+            }
+
+            toast.success("Staff details saved successfully");
             onSuccess();
-        } catch (error) { toast.error("Operation failed"); }
-        finally { setIsSaving(false); }
+        } catch (error) { 
+            console.error("Staff save error:", error);
+            toast.error("Operation failed"); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1312,7 +1370,19 @@ const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
                     <div className="grid grid-cols-2 gap-5">
                         <div>
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wide">Role</label>
-                            <select ref={roleRef} className="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })} onKeyDown={(e) => handleEnter(e, emergencyPhoneRef)}>
+                            <select 
+                                ref={roleRef} 
+                                className="w-full border border-gray-300 rounded-lg p-2.5 bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                                value={formData.role} 
+                                onChange={e => {
+                                    const newRole = e.target.value;
+                                    setFormData({ ...formData, role: newRole });
+                                    if (newRole === 'Admin' || newRole === 'Cashier') {
+                                        setEnableLogin(true);
+                                    }
+                                }} 
+                                onKeyDown={(e) => handleEnter(e, emergencyPhoneRef)}
+                            >
                                 {['Admin', 'Cashier', 'Senior Stylist', 'Junior Stylist', 'Beautician', 'Hair Specialist', 'Employee'].map(r => <option key={r} value={r}>{r}</option>)}
                             </select>
                         </div>
@@ -1320,6 +1390,54 @@ const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
                             <label className="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wide">Emergency Contact</label>
                             <input ref={emergencyPhoneRef} className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" value={formData.emergencyPhone} onChange={e => setFormData({ ...formData, emergencyPhone: e.target.value })} onKeyDown={(e) => handleEnter(e, salaryRef)} />
                         </div>
+                    </div>
+
+                    {/* ERP AUTHENTICATION ONBOARDING */}
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                                <Shield size={16} className="text-blue-600" /> System Login Access
+                            </h4>
+                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={enableLogin}
+                                    onChange={e => setEnableLogin(e.target.checked)}
+                                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <span>Enable ERP Login</span>
+                            </label>
+                        </div>
+                        {enableLogin && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-1 pt-2 border-t border-slate-200">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide flex items-center gap-1">
+                                        <Mail size={12} /> Email Address
+                                    </label>
+                                    <input
+                                        type="email"
+                                        placeholder="employee@mail.com"
+                                        required={enableLogin}
+                                        className="w-full border border-slate-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={formData.email}
+                                        onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wide flex items-center gap-1">
+                                        <Key size={12} /> {staff?.hasLoginAccount ? "New Password (Optional)" : "Login Password"}
+                                    </label>
+                                    <input
+                                        type="password"
+                                        placeholder={staff?.hasLoginAccount ? "Leave blank to keep" : "Min 6 characters"}
+                                        required={enableLogin && !staff?.hasLoginAccount}
+                                        className="w-full border border-slate-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={loginPassword}
+                                        onChange={e => setLoginPassword(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* EXTENDED SALARY & BANK CONFIG */}

@@ -11,6 +11,13 @@ const Settings = () => {
   const [gstNumber, setGstNumber] = useState('33ADFPN7561FL1ZK');
   const [billMessage, setBillMessage] = useState('Thank You For Your Purchasing');
   const [defaultGst, setDefaultGst] = useState('0');
+  const [addressLine1, setAddressLine1] = useState("No. 12, Gandhi Road");
+  const [addressLine2, setAddressLine2] = useState("Kanchipuram - 631501");
+  const [contactNo, setContactNo] = useState("+91 99944 11111");
+  const [bankName, setBankName] = useState("Axis Bank");
+  const [accountNo, setAccountNo] = useState("921020012345678");
+  const [ifscCode, setIfscCode] = useState("UTIB0001234");
+  const [branchName, setBranchName] = useState("Kanchipuram Branch");
   
   // Loyalty Settings
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
@@ -23,6 +30,13 @@ const Settings = () => {
       setGstNumber(settings.gstNumber || '33ADFPN7561FL1ZK');
       setBillMessage(settings.billMessage || 'Thank You For Your Purchasing');
       setDefaultGst(settings.defaultGst || '0');
+      setAddressLine1(settings.addressLine1 || "No. 12, Gandhi Road");
+      setAddressLine2(settings.addressLine2 || "Kanchipuram - 631501");
+      setContactNo(settings.contactNo || "+91 99944 11111");
+      setBankName(settings.bankName || "Axis Bank");
+      setAccountNo(settings.accountNo || "921020012345678");
+      setIfscCode(settings.ifscCode || "UTIB0001234");
+      setBranchName(settings.branchName || "Kanchipuram Branch");
       setLoyaltyEnabled(settings.loyaltyEnabled || false);
       setLoyaltySpendRatio(settings.loyaltySpendRatio || 100);
       setLoyaltyRedeemValue(settings.loyaltyRedeemValue || 1);
@@ -39,6 +53,13 @@ const Settings = () => {
         gstNumber,
         billMessage,
         defaultGst,
+        addressLine1,
+        addressLine2,
+        contactNo,
+        bankName,
+        accountNo,
+        ifscCode,
+        branchName,
         loyaltyEnabled,
         loyaltySpendRatio,
         loyaltyRedeemValue
@@ -58,54 +79,145 @@ const Settings = () => {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-800">Settings</h1>
       <div className="bg-white p-6 rounded-lg shadow-sm">
-        <div className="space-y-4 max-w-lg">
+        <div className="space-y-6 max-w-xl">
 
-          {/* --- Editable Shop Name Field --- */}
           <div>
-            <label htmlFor="shopName" className="font-medium text-gray-700">Shop Name</label>
-            <input
-              id="shopName"
-              type="text"
-              value={shopName}
-              onChange={(e) => setShopName(e.target.value)}
-              className="form-input mt-1"
-            />
+            <h2 className="text-lg font-bold text-gray-800 mb-3 border-b pb-2">Salon Profile & Invoice Details</h2>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="shopName" className="font-medium text-gray-700 text-sm">Shop / Salon Name</label>
+                <input
+                  id="shopName"
+                  type="text"
+                  value={shopName}
+                  onChange={(e) => setShopName(e.target.value)}
+                  className="form-input mt-1 w-full"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="addressLine1" className="font-medium text-gray-700 text-sm">Address Line 1</label>
+                <input
+                  id="addressLine1"
+                  type="text"
+                  value={addressLine1}
+                  onChange={(e) => setAddressLine1(e.target.value)}
+                  className="form-input mt-1 w-full"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="addressLine2" className="font-medium text-gray-700 text-sm">Address Line 2 (City, State, Pincode)</label>
+                <input
+                  id="addressLine2"
+                  type="text"
+                  value={addressLine2}
+                  onChange={(e) => setAddressLine2(e.target.value)}
+                  className="form-input mt-1 w-full"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="contactNo" className="font-medium text-gray-700 text-sm">Contact Number</label>
+                  <input
+                    id="contactNo"
+                    type="text"
+                    value={contactNo}
+                    onChange={(e) => setContactNo(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="gstNumber" className="font-medium text-gray-700 text-sm">GSTIN</label>
+                  <input
+                    id="gstNumber"
+                    type="text"
+                    value={gstNumber}
+                    onChange={(e) => setGstNumber(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="billMessage" className="font-medium text-gray-700 text-sm">Invoice Footer Message</label>
+                  <input
+                    id="billMessage"
+                    type="text"
+                    value={billMessage}
+                    onChange={e => setBillMessage(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="defaultGst" className="font-medium text-gray-700 text-sm">Default GST (%)</label>
+                  <input
+                    id="defaultGst"
+                    type="number"
+                    value={defaultGst}
+                    onChange={e => setDefaultGst(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* --- Editable GST Number Field --- */}
           <div>
-            <label htmlFor="gstNumber" className="font-medium text-gray-700">GST Number</label>
-            <input
-              id="gstNumber"
-              type="text"
-              value={gstNumber}
-              onChange={(e) => setGstNumber(e.target.value)}
-              className="form-input mt-1"
-            />
-          </div>
+            <h2 className="text-lg font-bold text-gray-800 mb-3 border-b pb-2">Bank & Payment Details (Printed on Invoice)</h2>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="bankName" className="font-medium text-gray-700 text-sm">Bank Name</label>
+                  <input
+                    id="bankName"
+                    type="text"
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
 
-          {/* --- Editable Bill Message Field --- */}
-          <div>
-            <label htmlFor="billMessage" className="font-medium text-gray-700">Custom Bill Message</label>
-            <input
-              id="billMessage"
-              type="text"
-              value={billMessage}
-              onChange={e => setBillMessage(e.target.value)}
-              className="form-input mt-1"
-            />
-          </div>
+                <div>
+                  <label htmlFor="branchName" className="font-medium text-gray-700 text-sm">Branch</label>
+                  <input
+                    id="branchName"
+                    type="text"
+                    value={branchName}
+                    onChange={(e) => setBranchName(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
+              </div>
 
-          {/* --- Editable Default GST Field --- */}
-          <div>
-            <label htmlFor="defaultGst" className="font-medium text-gray-700">Default GST Percentage (%)</label>
-            <input
-              id="defaultGst"
-              type="number"
-              value={defaultGst}
-              onChange={e => setDefaultGst(e.target.value)}
-              className="form-input mt-1"
-            />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="accountNo" className="font-medium text-gray-700 text-sm">Account Number</label>
+                  <input
+                    id="accountNo"
+                    type="text"
+                    value={accountNo}
+                    onChange={(e) => setAccountNo(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="ifscCode" className="font-medium text-gray-700 text-sm">IFSC Code</label>
+                  <input
+                    id="ifscCode"
+                    type="text"
+                    value={ifscCode}
+                    onChange={(e) => setIfscCode(e.target.value)}
+                    className="form-input mt-1 w-full"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="pt-6 border-t">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { billingApi, productApi, customerApi, estimationApi, appointmentApi, Appointment, staffApi, packageApi, customerPackageApi } from "@/lib/api";
+import { billingApi, productApi, customerApi, estimationApi, appointmentApi, Appointment, staffApi, packageApi, customerPackageApi, SalonService } from "@/lib/api";
 import { numberToWords } from "@/utils/numberToWords";
 import { useGlobalData } from "@/context/GlobalDataContext";
 import { useCachedResource } from '@/hooks/useCachedResource';
@@ -52,11 +52,13 @@ interface Product {
   price: number;
   sellingPrice?: number;
   RetailSellingPrice?: number;
-  quantity: number;
+  quantity?: number;
   stockQuantity?: number | null;
   availabilityStatus?: 'AVAILABLE' | 'UNAVAILABLE' | 'DISCONTINUED';
   inventoryTracking?: 'NOT_TRACKED' | 'TRACKED';
   imageUrl?: string;
+  vendorId?: string;
+  vendorName?: string;
 }
 
 interface BillItem extends Product {
@@ -73,6 +75,7 @@ interface BillItem extends Product {
   gstPrice?: number;
   finalPrice?: number;
   Discount: number | string; // %
+  discount?: number | string;
   discountAmt?: number | string; // Amount
   purchaseRate?: number;
   RetailSellingPrice?: number;
@@ -81,6 +84,7 @@ interface BillItem extends Product {
   commissionType?: 'PERCENTAGE' | 'FIXED';
   commissionValue?: number;
   staffCommissionAmount?: number;
+  category?: string;
 }
 
 
@@ -199,17 +203,33 @@ const buildPayloadFromUIItems = (
     const igstAmount = taxType === "INTER_STATE" ? gstAmount : 0;
 
     const productId = (ui as any).id || ui.barcode || "";
+    const isService = ui.type === "SERVICE" || !!ui.serviceId;
+    const itemStaffId = ui.staffId || staffId || "";
+
+    let itemStaffComm = 0;
+    if (isService && itemStaffId) {
+      if (ui.commissionType === 'FIXED') {
+        itemStaffComm = (Number(ui.commissionValue) || 0) * Number(qty);
+      } else if (ui.commissionValue && Number(ui.commissionValue) > 0) {
+        itemStaffComm = (netAmount * Number(ui.commissionValue)) / 100;
+      } else if (staffCommissionPercentage && Number(staffCommissionPercentage) > 0) {
+        itemStaffComm = (netAmount * Number(staffCommissionPercentage)) / 100;
+      }
+      itemStaffComm = round2(itemStaffComm);
+    }
 
     return {
-      type: ui.type || "PRODUCT",
-      productId: ui.type === "PRODUCT" ? productId : "",
-      serviceId: ui.type === "SERVICE" ? productId : "",
+      type: ui.type || (ui.serviceId ? "SERVICE" : "PRODUCT"),
+      productId: isService ? "" : productId,
+      serviceId: isService ? (ui.serviceId || productId) : "",
       packageId: ui.type === "PACKAGE" ? productId : "",
-      staffId: ui.staffId || "",
+      staffId: itemStaffId,
       staffName: ui.staffName || "",
       productName: ui.name || "",
       quantity: Number(qty) || 0,
+      qty: Number(qty) || 0,
       unitPrice: Number(unitPrice) || 0,
+      price: Number(unitPrice) || 0,
       gstPercent: Number(gstRate) || 0,
       gstRate: Number(gstRate) || 0,
       discountRate: Number(discountRate) || 0,
@@ -224,14 +244,13 @@ const buildPayloadFromUIItems = (
       igstAmount,
       finalAmount: netAmount,
       netAmount,
+      total: netAmount,
       imageUrl: ui.imageUrl || "",
       isRedeemed: ui.isRedeemed || false,
       customerPackageId: ui.customerPackageId || "",
       commissionType: ui.commissionType || "",
       commissionValue: ui.commissionValue || 0,
-      staffCommissionAmount: ui.type === 'SERVICE' && ui.staffId 
-        ? round2(ui.commissionType === 'FIXED' ? (ui.commissionValue || 0) * Number(qty) : (netAmount * (ui.commissionValue || 0) / 100))
-        : 0
+      staffCommissionAmount: itemStaffComm
     };
   });
 
@@ -260,14 +279,16 @@ const buildPayloadFromUIItems = (
     amountPaid = cashPaid + onlinePaid;
   }
 
-  const staffCommissionAmount = (staffCommissionPercentage && Number(staffCommissionPercentage) > 0)
-    ? round2(finalAmount * (Number(staffCommissionPercentage) / 100))
-    : 0;
+  const totalItemCommissions = round2(items.reduce((s, it) => s + (it.staffCommissionAmount || 0), 0));
+  const staffCommissionAmount = totalItemCommissions > 0
+    ? totalItemCommissions
+    : ((staffCommissionPercentage && Number(staffCommissionPercentage) > 0)
+        ? round2(finalAmount * (Number(staffCommissionPercentage) / 100))
+        : 0);
 
   const isPartial = paymentMethod === 'PARTIAL';
   const pendingAmount = isPartial ? round2(finalAmount - amountPaid) : 0;
-
-
+  const nowIso = new Date().toISOString();
 
   return {
     customerName: customerName || "",
@@ -291,21 +312,25 @@ const buildPayloadFromUIItems = (
     sgstAmount: sgstAmountTotal,
     igstAmount: igstAmountTotal,
     taxType,
+    subtotal: round2(items.reduce((s, it) => s + (it.unitPrice * it.quantity), 0)),
+    totalAmount: finalAmount,
     finalAmount,
     enableExpiryReminder: !!enableExpiryReminder,
     expiryDays: (expiryDays !== undefined && expiryDays !== null && expiryDays !== "") ? Number(expiryDays) : 30,
     customerId: customerId || "",
-    billType: "RETAIL",
+    billType: invoiceMode === "ESTIMATE" ? "ESTIMATE" : "RETAIL",
     systemType: "Retail",
     loyaltyDiscount,
     loyaltyPointsRedeemed,
-    loyaltyPointsEarned
+    loyaltyPointsEarned,
+    createdAt: nowIso,
+    date: nowIso
   };
 };
 
 const ProductSelectionModal = ({ products, onSelect, onClose }: { products: any[]; onSelect: (product: any) => void; onClose: () => void; }) => {
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
       <motion.div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[80vh] flex flex-col" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold">Select Product</h2>
@@ -472,51 +497,51 @@ const Billing: React.FC = () => {
   const [originalInvoiceId, setOriginalInvoiceId] = useState<string>("");
   const [originalTotal, setOriginalTotal] = useState(0);
   const [customerMode, setCustomerMode] = useState("Walk-in");
-  const documentMode = "Billing";
-  const setDocumentMode = (m: string) => {};
+  const [documentMode, setDocumentMode] = useState<"Billing" | "Estimation">("Billing");
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null);
 
-  
   const location = useLocation();
 
-  // Handle appointment state passed via navigation
+  // Handle appointment state passed via navigation or persistent URL query param
   useEffect(() => {
-    if (location.state?.appointment && salonServices.length > 0) {
-      const apt = location.state.appointment;
-      setCustomerName(apt.customerName || "");
-      setCustomerPhone(apt.customerPhone || "");
-      
-      const newItems: BillItem[] = [];
-      apt.serviceIds.forEach((serviceId: string) => {
-        const service = salonServices.find(s => s.id === serviceId);
-        if (service) {
-          const item = standardizeProduct(service);
-          newItems.push(computeItem({
-            ...item,
-            type: 'SERVICE',
-            qty: 1,
-            Discount: 0,
-            staffId: apt.staffId || ""
-          } as any));
+    const searchParams = new URLSearchParams(location.search);
+    const queryApptId = searchParams.get('appointmentId');
+    const apt = location.state?.appointment || (queryApptId ? appointments.find(a => a.id === queryApptId) : null);
+
+    if (apt && salonServices.length > 0) {
+      if (!selectedAppointmentId || selectedAppointmentId !== apt.id) {
+        setCustomerName(apt.customerName || "");
+        setCustomerPhone(apt.customerPhone || "");
+        
+        const newItems: BillItem[] = [];
+        apt.serviceIds?.forEach((serviceId: string) => {
+          const service = salonServices.find(s => s.id === serviceId);
+          if (service) {
+            const item = standardizeProduct(service);
+            newItems.push(computeItem({
+              ...item,
+              type: 'SERVICE',
+              qty: 1,
+              Discount: 0,
+              staffId: apt.staffId || ""
+            } as any));
+          }
+        });
+        
+        if (newItems.length > 0) {
+          setItems(newItems);
         }
-      });
-      
-      if (newItems.length > 0) {
-        setItems(newItems);
+        
+        setSelectedAppointmentId(apt.id || null);
       }
-      
-      setSelectedAppointmentId(apt.id || null);
-      
-      // Clear state so it doesn't re-trigger on refresh
-      window.history.replaceState({}, document.title);
     }
-  }, [location.state, salonServices]);
+  }, [location.state, location.search, appointments, salonServices, selectedAppointmentId]);
 
   const [activeBillId, setActiveBillId] = useState<string | null>(null);
   const [isHoldLoaded, setIsHoldLoaded] = useState(false);
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [highlightedProductIndex, setHighlightedProductIndex] = useState(0);
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
-  const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null);
 
   const barcodeInputRef = React.useRef<HTMLInputElement>(null);
   const customerNameRef = React.useRef<HTMLInputElement>(null);
@@ -670,7 +695,7 @@ const Billing: React.FC = () => {
 
       const matches = allSearchableItems
         .filter(p =>
-          (p.barcode && normalizeId(p.barcode) === normalizedInput) ||
+          (((p as any).barcode && normalizeId((p as any).barcode) === normalizedInput)) ||
           (p.id && normalizeId(p.id) === normalizedInput) ||
           (p.name && p.name.toLowerCase().includes(val.toLowerCase()))
         )
@@ -871,27 +896,33 @@ const Billing: React.FC = () => {
       setLoading(true);
       try {
         const billId = await handleSaveBill();
-        const domain = window.location.hostname === 'localhost' ? 'https://raju-electronics-dc327.web.app' : window.location.origin;
+        const domain = window.location.hostname === 'localhost' ? 'https://anjussaloon.web.app' : window.location.origin;
         const billUrl = `${domain}/bill/${billId}`;
-        const message = `Thank you for shopping at Anjus Beauty Saloon! View your bill for Rs. ${(totalAmount || 0).toFixed(2)} here: ${billUrl}`;
+        const message = `Thank you for shopping at ${shopName}! View your bill for Rs. ${(totalAmount || 0).toFixed(2)} here: ${billUrl}`;
 
-        // Send SMS securely via the backend
+        // Send SMS securely via the backend or SMS service
         let formattedPhone = customerPhone.trim();
         if (!formattedPhone.startsWith("+")) formattedPhone = "+91" + formattedPhone;
 
-        const response = await fetch("http://localhost:5000/send-sms", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to: formattedPhone, body: message })
-        });
+        const smsApiUrl = (import.meta as any).env.VITE_SMS_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:5000/send-sms' : '/api/send-sms');
+        try {
+          const response = await fetch(smsApiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ to: formattedPhone, body: message })
+          });
 
-        const responseData = await response.json();
-        if (!response.ok) throw new Error(responseData.error || "Failed to send SMS via backend");
+          const responseData = await response.json();
+          if (!response.ok) throw new Error(responseData.error || "Failed to send SMS");
 
-        toast.success(`SMS sent successfully to ${customerPhone}!`);
+          toast.success(`SMS sent successfully to ${customerPhone}!`);
+        } catch (fetchErr: any) {
+          console.warn("SMS gateway unreachable:", fetchErr);
+          toast.error("SMS service not available. Please use WhatsApp to share the bill link.");
+        }
       } catch (err: any) {
-        console.error("🔥 Error in sending SMS:", err);
-        toast.error(err.message || "Failed to send SMS.");
+        console.error("🔥 Error in saving bill for SMS:", err);
+        toast.error(err.message || "Failed to process bill.");
       } finally {
         setLoading(false);
       }
@@ -912,7 +943,7 @@ const Billing: React.FC = () => {
       setLoading(true);
       try {
         const billId = await handleSaveBill();
-        const domain = window.location.hostname === 'localhost' ? 'https://raju-electronics-dc327.web.app' : window.location.origin;
+        const domain = window.location.hostname === 'localhost' ? 'https://anjussaloon.web.app' : window.location.origin;
         const billUrl = `${domain}/bill/${billId}`;
         const message = `*Invoice from ${shopName}*\n\nHello *${customerName || 'Customer'}*,\nThank you for shopping with us!\nYour bill (ID: ${billId}) for *Rs. ${(Number(totalAmount) || 0).toFixed(2)}* is ready.\n\n📄 *View & Download Invoice:* \n${billUrl}\n\nHave a great day!`;
 
@@ -1052,13 +1083,13 @@ const Billing: React.FC = () => {
       purchaseRate: 0,
       sellingPrice: service.price,
       price: service.price,
-      discount: 0,
       stockQuantity: null,
       inventoryTracking: 'NOT_TRACKED',
       availabilityStatus: 'AVAILABLE',
       vendorId: '',
       vendorName: '',
       qty: 1,
+      quantity: 1,
       total: calculateItemTotal(service.price, 1, 0, Number(defaultGst) || 0),
       GST: Number(defaultGst) || 0,
       Discount: 0,
@@ -1080,16 +1111,34 @@ const Billing: React.FC = () => {
   };
 
   const handleRedeemPackageService = (pkg: any, itemIndex: number) => {
+    if (!pkg || !pkg.items || !pkg.items[itemIndex]) {
+      toast.error("Invalid package service selected");
+      return;
+    }
     const serviceItem = pkg.items[itemIndex];
-    if (serviceItem.usedQuantity >= serviceItem.totalQuantity) {
+    const totalQty = Number(serviceItem.totalQuantity) || 0;
+    const usedQty = Number(serviceItem.usedQuantity) || 0;
+    const remaining = totalQty - usedQty;
+    
+    if (remaining <= 0) {
       toast.error("This service has been fully used in this package.");
+      return;
+    }
+
+    // Check if user already added this package service to current cart
+    const alreadyInCart = items
+      .filter(it => it.isRedeemed && it.customerPackageId === pkg.id && it.serviceId === serviceItem.serviceId)
+      .reduce((sum, it) => sum + (Number(it.quantity || it.qty) || 1), 0);
+
+    if (alreadyInCart >= remaining) {
+      toast.error(`All ${remaining} remaining session(s) of this service are already added to your bill.`);
       return;
     }
     
     const newItem: BillItem = {
       id: `redeem-${pkg.id}-${serviceItem.serviceId}-${Date.now()}`,
-      barcode: `PKG-${(pkg.packageName || '').substring(0,3).toUpperCase()}`,
-      name: `(Redeemed) ${serviceItem.serviceName}`,
+      barcode: `PKG-${(pkg.packageName || '').substring(0, 3).toUpperCase()}`,
+      name: `(Package Redemption) ${serviceItem.serviceName}`,
       price: 0,
       RetailSellingPrice: 0,
       GST: 0,
@@ -1097,7 +1146,7 @@ const Billing: React.FC = () => {
       quantity: 1,
       qty: 1,
       total: 0,
-      systemType: p.systemType || "Retail",
+      systemType: "Retail",
       type: "SERVICE",
       serviceId: serviceItem.serviceId,
       isRedeemed: true,
@@ -1522,6 +1571,18 @@ const Billing: React.FC = () => {
         }
       }
 
+      // Refresh available customer packages if customer was linked
+      if (resolvedCustomerId) {
+        try {
+          const updatedPackages = await customerPackageApi.getByCustomer(resolvedCustomerId);
+          if (updatedPackages.data) {
+            setCustomerPackages(updatedPackages.data);
+          }
+        } catch (pkgRefErr) {
+          console.warn("Failed to refresh customer packages after billing:", pkgRefErr);
+        }
+      }
+
       return createdBill.id;
     } catch (err) {
       console.error("Create bill error:", err);
@@ -1704,6 +1765,7 @@ const Billing: React.FC = () => {
 
       // Status PAID triggers stock deduction and commissions on the backend
       (payload as any).status = "PAID";
+      (payload as any).appointmentId = selectedAppointmentId || null;
 
       // 1. Create or Pay the bill (In-place update for conversion)
       console.log("Billing Payload:", payload);
@@ -1723,36 +1785,15 @@ const Billing: React.FC = () => {
         refreshCancelled();
         refreshProducts();
 
-        // --- Update Customer Purchase Stats ---
+        // Customer purchase stats & loyalty are authoritatively updated in api.ts /billing/create.
+        // Refresh customer global data so UI reflects updated stats immediately.
         if (finalCustomerId) {
-          const cust = globalCustomers.find((c: any) => c.id === finalCustomerId);
-          const prevTotalSpent = cust?.totalSpent || 0;
-          const prevTotalPaid = cust?.totalPaid || 0;
-          const prevPending = cust?.pendingBalance || 0;
-          const prevVisits = cust?.visitCount || 0;
-          const prevLoyalty = cust?.loyaltyPoints || 0;
-
-          const customerUpdatePayload: any = {
-            totalSpent: round2(prevTotalSpent + payload.finalAmount),
-            totalPaid: round2(prevTotalPaid + payload.amountPaid),
-            pendingBalance: round2(prevPending + payload.pendingAmount),
-            visitCount: prevVisits + 1,
-            lastVisit: new Date().toISOString(),
-          };
-
-          // Merge loyalty points update if enabled
-          if (loyaltyEnabled) {
-            customerUpdatePayload.loyaltyPoints = prevLoyalty - payload.loyaltyPointsRedeemed + payload.loyaltyPointsEarned;
-          }
-
-          customerApi.update(finalCustomerId, customerUpdatePayload)
-            .then(() => refreshCustomers())
-            .catch(e => console.error("Failed to update customer stats:", e));
+          refreshCustomers();
         }
 
         // Update appointment status if one was linked
         if (selectedAppointmentId) {
-          appointmentApi.update(selectedAppointmentId, { status: 'COMPLETED' } as any)
+          appointmentApi.update(selectedAppointmentId, { status: 'COMPLETED', billId: finalId } as any)
             .then(() => refreshAppointments())
             .catch(e => console.error('Failed to update appointment status', e));
         }
@@ -2116,7 +2157,7 @@ const Billing: React.FC = () => {
 
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => { refreshProducts(); refreshCustomers(); toast("Refreshing data...", { icon: '🔄' }); }}
+                  onClick={() => { refreshProducts(); refreshCustomers(); toast("Refreshing data..."); }}
                   className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-all"
                   title="Refresh Data"
                 >
@@ -2209,11 +2250,12 @@ const Billing: React.FC = () => {
                     <th className="p-3 text-left">Item ID</th>
                     <th className="p-3 text-left">Item Name</th>
                     <th className="p-3 text-left">Staff</th>
-                    <th className="p-3 text-center">Price</th>
+                    <th className="p-3 text-center">Price (Incl. GST)</th>
                     <th className="p-3 text-center">Qty</th>
                     <th className="p-3 text-center">Disc (%)</th>
                     <th className="p-3 text-center">Disc (₹)</th>
-                    <th className="p-3 text-center">GST (%)</th><th className="p-3 text-center">Total</th>
+                    <th className="p-3 text-center">GST (%)</th>
+                    <th className="p-3 text-center">Total (Incl. GST)</th>
                     <th className="p-3 text-center">Action</th>
                   </tr>
                 </thead>
@@ -2644,19 +2686,25 @@ const Billing: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-1 mb-4">
-                <div className="flex justify-between text-sm text-gray-500">
-                  <span>Subtotal</span>
+              <div className="space-y-1.5 mb-4">
+                <div className="flex justify-between items-center pb-1.5 mb-1.5 border-b border-gray-100">
+                  <span className="text-[10px] font-black tracking-wider uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                    GST Inclusive Bill
+                  </span>
+                  <span className="text-[10px] text-gray-500 font-medium">All item prices include GST</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Taxable Value (Excl. Tax)</span>
                   <span className="font-mono">₹{(totalTaxableAmount || 0).toFixed(2)}</span>
                 </div>
                 {loyaltyPointsToRedeem > 0 && (
-                  <div className="flex justify-between text-sm text-green-600 font-medium">
+                  <div className="flex justify-between text-xs text-green-600 font-medium">
                     <span>Loyalty Discount</span>
                     <span className="font-mono">-₹{(loyaltyDiscountAmount || 0).toFixed(2)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm text-gray-500">
-                  <span>GST Total</span>
+                <div className="flex justify-between text-xs text-emerald-700 font-medium">
+                  <span>Total GST (Included in Total)</span>
                   <span className="font-mono">₹{(totalGstAmountDisplay || 0).toFixed(2)}</span>
                 </div>
                 {isReturnMode && (

@@ -11,6 +11,7 @@ import { BillRenderer } from "@/components/BillRenderer";
 import { mapExeBillData } from "@/utils/exeBillAdapter";
 import { useReactToPrint } from 'react-to-print';
 import { numberToWords } from "@/utils/numberToWords";
+import { calculateItemTax, round2 } from "@/lib/tax";
 import { useNavigate } from "react-router-dom";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Trash2, RotateCcw } from "lucide-react";
@@ -37,6 +38,9 @@ interface Bill {
   finalAmount?: number;
   paymentMethod?: string;
   createdAt?: string;
+  totalDiscountAmount?: number;
+  totalGstAmount?: number;
+  estimationId?: string;
 }
 
 const PrintedBills: React.FC = () => {
@@ -108,6 +112,50 @@ const PrintedBills: React.FC = () => {
     return globalBills;
   }, [activeTab, globalBills, data]);
 
+  const getBillTimestamp = (item: any): number => {
+    if (!item) return 0;
+    const candidates = [item.createdAt, item.timestamp, item.date, item.billDate, item.updatedAt];
+    for (const val of candidates) {
+      if (!val) continue;
+      if (typeof val === 'number') {
+        return val < 10000000000 ? val * 1000 : val;
+      }
+      if (val instanceof Date) {
+        const t = val.getTime();
+        if (!isNaN(t) && t > 0) return t;
+      }
+      if (typeof val === 'object') {
+        const s = val.seconds ?? val._seconds;
+        if (s !== undefined) return Number(s) * 1000;
+        if (typeof val.toDate === 'function') {
+          const t = val.toDate().getTime();
+          if (!isNaN(t) && t > 0) return t;
+        }
+      }
+      if (typeof val === 'string' && val.trim()) {
+        const parsed = Date.parse(val);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+    return 0;
+  };
+
+  const sortBillsDesc = (a: any, b: any): number => {
+    const timeA = getBillTimestamp(a);
+    const timeB = getBillTimestamp(b);
+    if (timeB !== timeA) {
+      return timeB - timeA;
+    }
+    const idA = String(a.invoiceId || a.invoiceNumber || a.id || '');
+    const idB = String(b.invoiceId || b.invoiceNumber || b.id || '');
+    return idB.localeCompare(idA);
+  };
+
+  const parseBillDate = (val: any): Date => {
+    const ts = getBillTimestamp({ createdAt: val });
+    return ts > 0 ? new Date(ts) : new Date(0);
+  };
+
   const normalizedData = React.useMemo(() => {
     return currentSourceData.map((item: any) => {
       let finalAmt = Number(item.finalAmount || item.totalAmount || item.total || 0);
@@ -122,41 +170,45 @@ const PrintedBills: React.FC = () => {
         }, 0);
       }
       return { ...item, finalAmount: finalAmt };
-    }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }).sort(sortBillsDesc);
   }, [currentSourceData]);
 
-  const filteredData = normalizedData.filter((item) => {
-    const status = ((item as any).status || "").toUpperCase();
-    const pm = ((item as any).paymentMethod || "").toUpperCase();
+  const filteredData = React.useMemo(() => {
+    return normalizedData
+      .filter((item) => {
+        const status = ((item as any).status || "").toUpperCase();
+        const pm = ((item as any).paymentMethod || "").toUpperCase();
 
-    // Logic for tab-based filtering
-    if (activeTab === "BILL") {
-        if (status === "HOLD" || status === "CANCELLED" || status === "REFUNDED") return false;
-        if (!status && (pm === "HOLD" || pm === "CANCELLED")) return false;
-    }
+        // Logic for tab-based filtering
+        if (activeTab === "BILL") {
+            if (status === "HOLD" || status === "CANCELLED" || status === "REFUNDED") return false;
+            if (!status && (pm === "HOLD" || pm === "CANCELLED")) return false;
+        }
 
-    if (systemTypeFilter !== "All" && item.systemType !== systemTypeFilter) return false;
+        if (systemTypeFilter !== "All" && item.systemType !== systemTypeFilter) return false;
 
-    const billDate = new Date(item.createdAt);
-    if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      if (billDate < start) return false;
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      if (billDate > end) return false;
-    }
+        const billDate = parseBillDate(item.createdAt || (item as any).date);
+        if (startDate) {
+          const start = new Date(startDate);
+          start.setHours(0, 0, 0, 0);
+          if (billDate < start) return false;
+        }
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          if (billDate > end) return false;
+        }
 
-    if (!searchTerm) return true;
-    const lower = searchTerm.toLowerCase();
-    const id = (item.invoiceId || item.id || "").toLowerCase();
-    const name = (item.customerName || "").toLowerCase();
-    const phone = (item.customerPhone || "").toString();
+        if (!searchTerm) return true;
+        const lower = searchTerm.toLowerCase();
+        const id = (item.invoiceId || item.id || "").toLowerCase();
+        const name = (item.customerName || "").toLowerCase();
+        const phone = (item.customerPhone || "").toString();
 
-    return id.includes(lower) || name.includes(lower) || phone.includes(searchTerm);
-  });
+        return id.includes(lower) || name.includes(lower) || phone.includes(searchTerm);
+      })
+      .sort(sortBillsDesc);
+  }, [normalizedData, activeTab, systemTypeFilter, startDate, endDate, searchTerm]);
 
   const totalAmount = filteredData.reduce((sum, item) => sum + (item.finalAmount || 0), 0);
 
@@ -171,7 +223,10 @@ const PrintedBills: React.FC = () => {
       "ID": item.invoiceId || item.id,
       "Customer Name": item.customerName || "Walk-in",
       "Contact": item.customerPhone || "N/A",
-      "Date": new Date(item.createdAt).toLocaleDateString("en-GB"),
+      "Date": (() => {
+        const ts = getBillTimestamp(item);
+        return ts > 0 ? new Date(ts).toLocaleDateString("en-GB") : "N/A";
+      })(),
       "Items": item.items?.length || 0,
       "Total": item.finalAmount,
     }));
@@ -201,15 +256,12 @@ const PrintedBills: React.FC = () => {
       const discountRate = Number(item.discountRate) || 0;
       const gstRate = Number(item.gstRate) || 0;
 
-      const subtotal = price * qty;
-      const discountAmount = subtotal * (discountRate / 100);
-      const taxable = subtotal - discountAmount;
-      const gstAmount = taxable * (gstRate / 100);
-      const finalAmount = taxable + gstAmount;
+      // Use centralized GST calculation (inclusive by default for retail salon)
+      const calc = calculateItemTax(price, qty, discountRate, gstRate, true);
 
-      totalTaxableAmount += taxable;
-      totalDiscountAmount += discountAmount;
-      totalGstAmount += gstAmount;
+      totalTaxableAmount += calc.taxableAmount;
+      totalDiscountAmount += calc.discountAmount;
+      totalGstAmount += calc.gstAmount;
 
       return {
         productId: (item as any).productId || (item as any).barcode || (item as any).id,
@@ -221,23 +273,23 @@ const PrintedBills: React.FC = () => {
         GST: gstRate,
         discountRate: discountRate,
         Discount: discountRate,
-        discountAmount: discountAmount,
-        baseAmount: taxable,
-        gstAmount: gstAmount,
-        finalAmount: finalAmount,
-        total: finalAmount
+        discountAmount: calc.discountAmount,
+        baseAmount: calc.taxableAmount,
+        gstAmount: calc.gstAmount,
+        finalAmount: calc.finalAmount,
+        total: calc.finalAmount
       };
     });
 
     const exeData = mapExeBillData({
       ...bill,
       items: printItems,
-      totalAmount: bill.finalAmount || totalTaxableAmount + totalGstAmount,
+      totalAmount: bill.finalAmount ?? (totalTaxableAmount + totalGstAmount),
       subtotal: totalTaxableAmount,
-      totalDiscountAmount,
-      totalGstAmount,
-      cgstAmount: totalGstAmount / 2,
-      sgstAmount: totalGstAmount / 2,
+      totalDiscountAmount: bill.totalDiscountAmount ?? totalDiscountAmount,
+      totalGstAmount: bill.totalGstAmount ?? totalGstAmount,
+      cgstAmount: bill.totalGstAmount ? round2(bill.totalGstAmount / 2) : round2(totalGstAmount / 2),
+      sgstAmount: bill.totalGstAmount ? round2(bill.totalGstAmount / 2) : round2(totalGstAmount / 2),
       billNo: bill.invoiceId || bill.id,
       settings: {
          gstPercentage: 12,
@@ -260,15 +312,12 @@ const PrintedBills: React.FC = () => {
       const discountRate = Number(item.discountRate) || 0;
       const gstRate = Number(item.gstRate) || 0;
 
-      const subtotal = price * qty;
-      const discountAmount = subtotal * (discountRate / 100);
-      const taxable = subtotal - discountAmount;
-      const gstAmount = taxable * (gstRate / 100);
-      const finalAmount = taxable + gstAmount;
+      // Use centralized GST calculation (inclusive by default for retail salon)
+      const calc = calculateItemTax(price, qty, discountRate, gstRate, true);
 
-      totalTaxableAmount += taxable;
-      totalDiscountAmount += discountAmount;
-      totalGstAmount += gstAmount;
+      totalTaxableAmount += calc.taxableAmount;
+      totalDiscountAmount += calc.discountAmount;
+      totalGstAmount += calc.gstAmount;
 
       return {
         productId: (item as any).productId || (item as any).barcode || (item as any).id,
@@ -280,23 +329,23 @@ const PrintedBills: React.FC = () => {
         GST: gstRate,
         discountRate: discountRate,
         Discount: discountRate,
-        discountAmount: discountAmount,
-        baseAmount: taxable,
-        gstAmount: gstAmount,
-        finalAmount: finalAmount,
-        total: finalAmount
+        discountAmount: calc.discountAmount,
+        baseAmount: calc.taxableAmount,
+        gstAmount: calc.gstAmount,
+        finalAmount: calc.finalAmount,
+        total: calc.finalAmount
       };
     });
 
     const exeData = mapExeBillData({
       ...est,
       items: printItems,
-      totalAmount: est.finalAmount || totalTaxableAmount + totalGstAmount,
+      totalAmount: est.finalAmount ?? (totalTaxableAmount + totalGstAmount),
       subtotal: totalTaxableAmount,
-      totalDiscountAmount,
-      totalGstAmount,
-      cgstAmount: totalGstAmount / 2,
-      sgstAmount: totalGstAmount / 2,
+      totalDiscountAmount: est.totalDiscountAmount ?? totalDiscountAmount,
+      totalGstAmount: est.totalGstAmount ?? totalGstAmount,
+      cgstAmount: est.totalGstAmount ? round2(est.totalGstAmount / 2) : round2(totalGstAmount / 2),
+      sgstAmount: est.totalGstAmount ? round2(est.totalGstAmount / 2) : round2(totalGstAmount / 2),
       billNo: est.estimationId || est.id,
       billType: "BILL", // Use BILL type to show TAX INVOICE as requested
       settings: {
@@ -344,17 +393,7 @@ const PrintedBills: React.FC = () => {
           <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-1 focus:ring-blue-500 outline-none placeholder-gray-300" placeholder="dd-mm-yyyy" />
         </div>
 
-        <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
-            {['All', 'Retail'].map((type) => (
-                <button
-                    key={type}
-                    onClick={() => setSystemTypeFilter(type as any)}
-                    className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${systemTypeFilter === type ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}
-                >
-                    {type.toUpperCase()}
-                </button>
-            ))}
-        </div>
+
 
         <button
           onClick={handleExportExcel}
@@ -397,14 +436,17 @@ const PrintedBills: React.FC = () => {
                     <td className="p-4 font-bold text-gray-700 uppercase">{item.customerName || "Walk-in"}</td>
                     <td className="p-4 text-gray-600 font-medium">{item.customerPhone || "N/A"}</td>
                     <td className="p-4 text-gray-500 text-xs font-medium">
-                       {new Date(item.createdAt).toLocaleString('en-GB', { 
-                          day: '2-digit', 
-                          month: '2-digit', 
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit'
-                       })}
+                       {(() => {
+                          const ts = getBillTimestamp(item);
+                          return ts > 0 ? new Date(ts).toLocaleString('en-GB', { 
+                            day: '2-digit', 
+                            month: '2-digit', 
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                          }) : 'N/A';
+                       })()}
                     </td>
                     <td className="p-4 text-center">
                       <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full font-bold text-xs">{item.items?.length || 0}</span>

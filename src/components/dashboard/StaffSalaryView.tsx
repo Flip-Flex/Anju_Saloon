@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Loader2, Printer, Ban, Clock, CheckCircle, Download, Banknote } from 'lucide-react';
 import * as XLSX from 'xlsx';
-// @ts-ignore
 import html2pdf from 'html2pdf.js';
 import { staffApi, Staff, SalarySlip } from '@/lib/api';
 import toast from 'react-hot-toast';

@@ -80,12 +80,67 @@ const Appointments = () => {
       return;
     }
 
+    // Canonical calculations
+    const selectedServices = salonServices.filter(s => formData.serviceIds?.includes(s.id!));
+    const serviceNames = selectedServices.map(s => s.name);
+    const serviceName = serviceNames.join(', ');
+    const assignedStaff = staff.find(s => s.id === formData.staffId);
+    const staffName = assignedStaff ? assignedStaff.name : '';
+
+    // Calculate duration in minutes (sum of service durations or 30 mins each)
+    const totalDuration = selectedServices.reduce((sum, s) => sum + (Number(s.duration) || 30), 0) || 30;
+
+    // Calculate start & end times
+    const startTime = formData.time;
+    const [h, m] = startTime.split(':').map(Number);
+    const startTotalMin = h * 60 + m;
+    const endTotalMin = startTotalMin + totalDuration;
+    const endH = Math.floor(endTotalMin / 60) % 24;
+    const endM = endTotalMin % 60;
+    const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+
+    // Conflict detection: Check if assigned staff has overlapping appointment
+    if (formData.staffId) {
+      const conflict = appointments.find(a => {
+        if (a.id === editingId) return false;
+        if (a.date !== formData.date) return false;
+        if (a.staffId !== formData.staffId) return false;
+        if (a.status === 'CANCELLED' || a.status === 'NO_SHOW') return false;
+
+        const otherStart = a.startTime || a.time || '10:00';
+        const [oh, om] = otherStart.split(':').map(Number);
+        const otherStartMin = oh * 60 + om;
+        const otherDur = Number(a.durationMinutes) || (a.serviceIds?.length ? a.serviceIds.length * 30 : 30);
+        const otherEndMin = otherStartMin + otherDur;
+
+        // Check time interval overlap
+        return startTotalMin < otherEndMin && endTotalMin > otherStartMin;
+      });
+
+      if (conflict) {
+        const proceed = window.confirm(
+          `Staff Conflict Warning:\n${staffName || 'Staff'} already has an active appointment at ${conflict.startTime || conflict.time} with ${conflict.customerName}.\n\nDo you want to proceed anyway?`
+        );
+        if (!proceed) return;
+      }
+    }
+
+    const payload: Partial<Appointment> = {
+      ...formData,
+      serviceNames,
+      serviceName,
+      staffName,
+      startTime,
+      endTime,
+      durationMinutes: totalDuration
+    };
+
     try {
       if (editingId) {
-        await appointmentApi.update(editingId, { ...formData, updatedAt: new Date().toISOString() });
+        await appointmentApi.update(editingId, { ...payload, updatedAt: new Date().toISOString() });
         toast({ title: 'Success', description: 'Appointment updated.' });
       } else {
-        await appointmentApi.add({ ...formData, createdAt: new Date().toISOString() });
+        await appointmentApi.add({ ...payload, createdAt: new Date().toISOString() });
         toast({ title: 'Success', description: 'Appointment created.' });
       }
       await refreshAppointments();
@@ -108,7 +163,8 @@ const Appointments = () => {
 
   const handleCreateBill = (apt: Appointment) => {
     const isAdmin = location.pathname.includes('/admin');
-    navigate(isAdmin ? '/admin/billing' : '/cashier/billing', { state: { appointment: apt } });
+    const targetPath = isAdmin ? '/admin/billing' : '/cashier/billing';
+    navigate(`${targetPath}?appointmentId=${apt.id}`, { state: { appointment: apt } });
   };
 
   const toggleService = (serviceId: string) => {

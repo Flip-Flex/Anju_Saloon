@@ -5,6 +5,9 @@ import { billingApi, productApi, appointmentApi, Bill, Product, Appointment } fr
 import { startOfDay, endOfDay, format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
 const CashierDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [bills, setBills] = useState<Bill[]>([]);
@@ -13,16 +16,40 @@ const CashierDashboard = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    let unsubscribeBills: () => void;
+
     const fetchData = async () => {
       try {
-        const [billsRes, productsRes, apptsRes] = await Promise.all([
-          billingApi.getAll(),
+        const [productsRes, apptsRes] = await Promise.all([
           productApi.getAll(),
           appointmentApi.getAll(),
         ]);
-        if (Array.isArray(billsRes.data)) setBills(billsRes.data);
         if (Array.isArray(productsRes.data)) setProducts(productsRes.data);
         if (Array.isArray(apptsRes.data)) setAppointments(apptsRes.data);
+
+        // Real-time listener for bills
+        unsubscribeBills = onSnapshot(collection(db, 'bills'), (snap) => {
+          setBills(snap.docs.map(d => {
+            const data = d.data();
+            let createdAt = data.createdAt || data.date || data.billDate;
+            if (createdAt && typeof createdAt === 'object') {
+              const s = createdAt.seconds ?? createdAt._seconds;
+              if (s !== undefined) createdAt = new Date(s * 1000).toISOString();
+              else if (typeof createdAt.toDate === 'function') createdAt = createdAt.toDate().toISOString();
+            }
+            if (!createdAt) createdAt = new Date().toISOString();
+            const finalAmt = Number(data.finalAmount ?? data.totalAmount ?? data.amountPaid ?? 0);
+            return {
+              ...data,
+              id: d.id,
+              createdAt,
+              date: data.date || createdAt,
+              finalAmount: finalAmt,
+              totalAmount: Number(data.totalAmount ?? finalAmt),
+              invoiceNumber: data.invoiceNumber || data.invoiceId || d.id
+            };
+          }) as unknown as Bill[]);
+        });
       } catch (error) {
         console.error("Failed to fetch data:", error);
       } finally {
@@ -30,6 +57,10 @@ const CashierDashboard = () => {
       }
     };
     fetchData();
+
+    return () => {
+      if (unsubscribeBills) unsubscribeBills();
+    };
   }, []);
 
   const { todayBills, todayRevenue, lowStockCount, todayAppointmentsCount, recentBills } = useMemo(() => {
@@ -37,17 +68,29 @@ const CashierDashboard = () => {
     const start = startOfDay(now);
     const end = endOfDay(now);
 
+    const parseDate = (val: any): Date => {
+      if (!val) return new Date(0);
+      if (val instanceof Date) return val;
+      if (typeof val === 'object') {
+        const s = val.seconds ?? val._seconds;
+        if (s !== undefined) return new Date(s * 1000);
+        if (typeof val.toDate === 'function') return val.toDate();
+      }
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? new Date(0) : d;
+    };
+
     const todays = bills.filter(bill => {
       if (bill.status === 'CANCELLED' || bill.status === 'HOLD' || bill.status === 'REFUNDED') return false;
-      const billDate = new Date(bill.createdAt || new Date());
+      const billDate = parseDate(bill.createdAt || (bill as any).date);
       return billDate >= start && billDate <= end;
     });
 
-    const revenue = todays.reduce((sum, bill) => sum + (bill.finalAmount || bill.amountPaid || 0), 0);
+    const revenue = todays.reduce((sum, bill) => sum + Number(bill.finalAmount ?? bill.totalAmount ?? bill.amountPaid ?? 0), 0);
     const lowStock = products.filter(p => (p.stockQuantity || 0) <= 5).length;
     
     const sortedBills = [...bills]
-      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .sort((a, b) => parseDate(b.createdAt || (b as any).date).getTime() - parseDate(a.createdAt || (a as any).date).getTime())
       .slice(0, 5);
 
     const todayStr = format(now, 'yyyy-MM-dd');

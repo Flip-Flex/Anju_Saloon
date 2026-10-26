@@ -8,7 +8,7 @@ const VENDOR_SERVICE_URL = isDev ? '/proxy' : 'https://vendor-service-demo-55182
 const REPORT_SERVICE_URL = isDev ? '/proxy' : 'https://billing-service-demo-551828258445.asia-southeast1.run.app/api';
 const STAFF_SERVICE_URL = isDev ? '/proxy' : 'https://staff-service-demo-551828258445.asia-southeast1.run.app/api';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 
 // --- Create a separate Axios instance for each service ---
 const productService = axios.create({ baseURL: PRODUCT_SERVICE_URL, timeout: 15000 });
@@ -175,9 +175,12 @@ const firestoreAdapter = async (config: any) => {
       return respond({ id: ref.id, ...parsedData });
     }
     
-    // Salon Services
+    // Salon Services (Canonical collection: 'services')
     if (url.includes('/salon-services/all') && method === 'get') {
-      const snap = await getDocs(collection(db, 'services'));
+      let snap = await getDocs(collection(db, 'services'));
+      if (snap.empty) {
+        snap = await getDocs(collection(db, 'salon_services'));
+      }
       return respond(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     }
     if (url.includes('/salon-services/add') && method === 'post') {
@@ -188,7 +191,6 @@ const firestoreAdapter = async (config: any) => {
     if (url.includes('/salon-services/update') && method === 'patch') {
       const id = url.split('/').pop();
       const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-      console.log('UPDATING SALON SERVICE', id, parsedData);
       if (id) await updateDoc(doc(db, 'services', id), parsedData);
       return respond({ id, ...parsedData });
     }
@@ -198,7 +200,10 @@ const firestoreAdapter = async (config: any) => {
       return respond({ success: true });
     }
     if (url.includes('/salon-services/categories') && method === 'get') {
-      const snap = await getDocs(collection(db, 'salon_service_categories'));
+      let snap = await getDocs(collection(db, 'service_categories'));
+      if (snap.empty) {
+        snap = await getDocs(collection(db, 'salon_service_categories'));
+      }
       return respond(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     }
 
@@ -277,35 +282,70 @@ const firestoreAdapter = async (config: any) => {
         );
       return respond(reminderBills);
     }
+    const mapBillDoc = (d: any) => {
+      const data = d.data();
+      const rawDate = data.createdAt ?? data.timestamp ?? data.date ?? data.billDate ?? data.updatedAt;
+      let createdAt = '';
+      if (rawDate && typeof rawDate === 'object') {
+        const s = rawDate.seconds ?? rawDate._seconds;
+        if (s !== undefined) createdAt = new Date(s * 1000).toISOString();
+        else if (typeof rawDate.toDate === 'function') createdAt = rawDate.toDate().toISOString();
+      } else if (typeof rawDate === 'number') {
+        const ms = rawDate < 10000000000 ? rawDate * 1000 : rawDate;
+        createdAt = new Date(ms).toISOString();
+      } else if (typeof rawDate === 'string' && rawDate.trim()) {
+        const parsed = Date.parse(rawDate);
+        createdAt = !isNaN(parsed) ? new Date(parsed).toISOString() : rawDate;
+      }
+      const finalAmt = Number(data.finalAmount ?? data.totalAmount ?? data.amountPaid ?? 0);
+      return {
+        ...data,
+        id: d.id,
+        createdAt,
+        date: data.date || createdAt,
+        totalAmount: Number(data.totalAmount ?? finalAmt),
+        finalAmount: finalAmt,
+        invoiceNumber: data.invoiceNumber || data.invoiceId || d.id
+      };
+    };
+
     if (url.includes('/billing/all') && method === 'get') {
       const snap = await getDocs(collection(db, 'bills'));
-      return respond(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      return respond(snap.docs.map(mapBillDoc));
     }
     if (url.includes('/billing/range') && method === 'get') {
       const snap = await getDocs(collection(db, 'bills'));
-      return respond(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      return respond(snap.docs.map(mapBillDoc));
     }
     if (url.includes('/billing/search') && method === 'get') {
       const snap = await getDocs(collection(db, 'bills'));
       // Basic mock fallback
-      return respond(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      return respond(snap.docs.map(mapBillDoc));
     }
     if (url.includes('/billing/hold') && method === 'get') {
       const snap = await getDocs(query(collection(db, 'bills'), where('status', '==', 'HOLD')));
-      return respond(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      return respond(snap.docs.map(mapBillDoc));
     }
     if (url.includes('/billing/cancelled') && method === 'get') {
       const snap = await getDocs(query(collection(db, 'bills'), where('status', '==', 'CANCELLED')));
-      return respond(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      return respond(snap.docs.map(mapBillDoc));
     }
     // Single bill GET
     if (url.includes('/billing/') && !url.includes('/update') && !url.includes('/pay') && !url.includes('/cancel') && !url.includes('/refund') && !url.includes('/notifications') && !url.includes('/all') && !url.includes('/create') && !url.includes('/search') && !url.includes('/range') && method === 'get') {
       const parts = url.split('?')[0].split('/');
       const id = parts[parts.indexOf('billing') + 1];
       if (id) {
+        try {
+          const docSnap = await getDoc(doc(db, 'bills', id));
+          if (docSnap.exists()) {
+            return respond(mapBillDoc(docSnap));
+          }
+        } catch (err) {
+          console.warn('Direct getDoc failed, falling back to query:', err);
+        }
         const snap = await getDocs(query(collection(db, 'bills'), where('__name__', '==', id)));
         if (!snap.empty) {
-          return respond({ id: snap.docs[0].id, ...snap.docs[0].data() });
+          return respond(mapBillDoc(snap.docs[0]));
         }
       }
       return respond(null, 404);
@@ -320,6 +360,17 @@ const firestoreAdapter = async (config: any) => {
     }
     if (url.includes('/billing/create') && method === 'post') {
       const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      
+      const nowIso = new Date().toISOString();
+      parsedData.createdAt = parsedData.createdAt || nowIso;
+      parsedData.date = parsedData.date || nowIso;
+      parsedData.status = parsedData.status || 'PAID';
+      parsedData.systemType = parsedData.systemType || 'Retail';
+      const shortId = generateShortId();
+      parsedData.invoiceId = shortId;
+      parsedData.invoiceNumber = parsedData.invoiceNumber || parsedData.invoiceId || shortId;
+      parsedData.totalAmount = Number(parsedData.totalAmount ?? parsedData.finalAmount ?? 0);
+      parsedData.finalAmount = Number(parsedData.finalAmount ?? parsedData.totalAmount ?? 0);
 
       // Auto-link customerId if missing but phone matches an existing customer
       let linkedCustomerId = parsedData.customerId;
@@ -336,8 +387,6 @@ const firestoreAdapter = async (config: any) => {
         }
       }
 
-      const shortId = generateShortId();
-      parsedData.invoiceId = shortId;
       const ref = doc(db, 'bills', shortId);
       await setDoc(ref, parsedData);
 
@@ -354,13 +403,36 @@ const firestoreAdapter = async (config: any) => {
             const billTotal = Number(parsedData.finalAmount || parsedData.totalAmount) || 0;
             const billPaid = Number(parsedData.amountPaid) || (parsedData.status === 'PAID' ? billTotal : 0);
 
+            const prevLoyalty = Number(custData.loyaltyPoints) || 0;
+            const redeemedLoyalty = Number(parsedData.loyaltyPointsRedeemed) || 0;
+            const earnedLoyalty = Number(parsedData.loyaltyPointsEarned) || 0;
+            const updatedLoyalty = Math.max(0, prevLoyalty - redeemedLoyalty + earnedLoyalty);
+
             await updateDoc(custRef, {
               totalSpent: prevSpent + billTotal,
               totalPaid: prevPaid + billPaid,
               pendingBalance: Math.max(0, (prevSpent + billTotal) - (prevPaid + billPaid)),
               visitCount: prevVisits + 1,
+              loyaltyPoints: updatedLoyalty,
               lastVisit: new Date().toISOString()
             });
+
+            // Log loyalty transaction ledger entry
+            if (earnedLoyalty > 0 || redeemedLoyalty > 0) {
+              try {
+                await addDoc(collection(db, 'loyalty_transactions'), {
+                  customerId: linkedCustomerId,
+                  billId: ref.id,
+                  pointsEarned: earnedLoyalty,
+                  pointsRedeemed: redeemedLoyalty,
+                  resultingBalance: updatedLoyalty,
+                  type: 'BILL',
+                  createdAt: nowIso
+                });
+              } catch (ltErr) {
+                console.warn("Failed to log loyalty transaction:", ltErr);
+              }
+            }
           }
         } catch (cErr) {
           console.error("Failed to update customer stats in /billing/create:", cErr);
@@ -401,11 +473,200 @@ const firestoreAdapter = async (config: any) => {
         }
       }
 
+      // Record staff commissions in staff_commissions collection
+      if (parsedData.status === 'PAID' && parsedData.items) {
+        let itemsCommSum = 0;
+        for (const item of parsedData.items) {
+          const itemStaffId = item.staffId || parsedData.staffId;
+          const commAmt = Number(item.staffCommissionAmount) || 0;
+          if (commAmt > 0 && itemStaffId) {
+            itemsCommSum += commAmt;
+            try {
+              await addDoc(collection(db, 'staff_commissions'), {
+                staffId: itemStaffId,
+                staffName: item.staffName || '',
+                billId: ref.id,
+                date: parsedData.createdAt,
+                createdAt: parsedData.createdAt,
+                amount: parsedData.finalAmount,
+                commissionAmount: commAmt,
+                staffCommissionAmount: commAmt,
+                serviceId: item.serviceId || '',
+                serviceName: item.productName || item.name || '',
+                status: 'UNPAID'
+              });
+            } catch (scErr) {
+              console.error("Failed to add item commission record:", scErr);
+            }
+          }
+        }
+
+        if (itemsCommSum === 0 && Number(parsedData.staffCommissionAmount) > 0 && parsedData.staffId) {
+          try {
+            await addDoc(collection(db, 'staff_commissions'), {
+              staffId: parsedData.staffId,
+              billId: ref.id,
+              date: parsedData.createdAt,
+              createdAt: parsedData.createdAt,
+              amount: parsedData.finalAmount,
+              commissionAmount: Number(parsedData.staffCommissionAmount),
+              staffCommissionAmount: Number(parsedData.staffCommissionAmount),
+              status: 'UNPAID'
+            });
+          } catch (scErr) {
+            console.error("Failed to add bill-level commission record:", scErr);
+          }
+        }
+      }
+
       return respond({ id: ref.id, ...parsedData });
     }
-    if (url.includes('/billing/') && url.includes('/pay') && method === 'patch') {
+    // Record payment on an existing bill (due payment)
+    if (url.includes('/billing/') && url.includes('/record-payment') && method === 'patch') {
+      const parts = url.split('?')[0].split('/');
+      const recordPaymentIdx = parts.indexOf('record-payment');
+      const id = recordPaymentIdx > 0 ? parts[recordPaymentIdx - 1] : parts.slice(-2, -1)[0];
+      const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const paymentAmount = Number(parsedData.amount) || 0;
+      const paymentMode = parsedData.paymentMode || parsedData.mode || 'CASH';
+      const description = parsedData.description || parsedData.remarks || '';
+
+      if (paymentAmount <= 0) {
+        return respond({ error: 'Invalid payment amount' }, 400);
+      }
+
+      if (!id) {
+        return respond({ error: 'Bill ID missing' }, 400);
+      }
+
+      // Fetch the bill document from Firestore
+      let billDocSnap: any = null;
+      let billRef = doc(db, 'bills', id);
+      try {
+        const directSnap = await getDoc(billRef);
+        if (directSnap.exists()) {
+          billDocSnap = directSnap;
+        }
+      } catch (err) {
+        console.warn('Direct getDoc failed in /record-payment, querying collection:', err);
+      }
+
+      if (!billDocSnap) {
+        const snap = await getDocs(query(collection(db, 'bills'), where('__name__', '==', id)));
+        if (!snap.empty) {
+          billDocSnap = snap.docs[0];
+          billRef = billDocSnap.ref;
+        } else {
+          const snap2 = await getDocs(query(collection(db, 'bills'), where('invoiceNumber', '==', id)));
+          if (!snap2.empty) {
+            billDocSnap = snap2.docs[0];
+            billRef = billDocSnap.ref;
+          } else {
+            const snap3 = await getDocs(query(collection(db, 'bills'), where('id', '==', id)));
+            if (!snap3.empty) {
+              billDocSnap = snap3.docs[0];
+              billRef = billDocSnap.ref;
+            }
+          }
+        }
+      }
+
+      if (!billDocSnap || !billDocSnap.exists()) {
+        return respond({ error: 'Bill not found' }, 404);
+      }
+
+      const billData = billDocSnap.data();
+      const nowIso = new Date().toISOString();
+      const totalAmount = Number(billData.finalAmount ?? billData.totalAmount ?? 0);
+      const prevAmountPaid = Number(billData.amountPaid ?? (billData.status === 'PAID' ? totalAmount : 0));
+      const newAmountPaid = prevAmountPaid + paymentAmount;
+      const newBalance = Math.max(0, totalAmount - newAmountPaid);
+      const newStatus = newBalance <= 0.01 ? 'PAID' : 'PARTIAL';
+
+      const paymentRecord = {
+        amount: paymentAmount,
+        paymentMode,
+        description: description || '',
+        paymentDate: nowIso,
+        balanceAfterPayment: newBalance,
+        statusAfterPayment: newStatus
+      };
+
+      const existingHistory = Array.isArray(billData.paymentHistory) ? billData.paymentHistory : [];
+      const updatedHistory = [...existingHistory, paymentRecord];
+
+      const billUpdatePayload: any = {
+        amountPaid: newAmountPaid,
+        balance: newBalance,
+        pendingBalance: newBalance,
+        pendingAmount: newBalance,
+        status: newStatus,
+        paymentHistory: updatedHistory,
+        updatedAt: nowIso
+      };
+
+      if (billData.paymentMethod === 'PENDING' || billData.paymentMethod === 'CREDIT') {
+        billUpdatePayload.paymentMethod = paymentMode;
+      }
+
+      await updateDoc(billRef, billUpdatePayload);
+
+      // Synchronize customer totalPaid and pendingBalance
+      let customerId = billData.customerId || billData.customer_id;
+      if (!customerId && billData.customerPhone) {
+        const bPhoneClean = billData.customerPhone.toString().replace(/\D/g, '');
+        if (bPhoneClean.length >= 7) {
+          try {
+            const custSnap = await getDocs(collection(db, 'customers'));
+            const matchCust = custSnap.docs.find(d => {
+              const cp = (d.data().phone || '').toString().replace(/\D/g, '');
+              return cp === bPhoneClean || (cp.length >= 10 && bPhoneClean.length >= 10 && cp.slice(-10) === bPhoneClean.slice(-10));
+            });
+            if (matchCust) customerId = matchCust.id;
+          } catch (cErr) {
+            console.warn("Failed customer phone lookup in /record-payment:", cErr);
+          }
+        }
+      }
+
+      if (customerId) {
+        try {
+          const custRef = doc(db, 'customers', customerId);
+          const custSnap = await getDoc(custRef);
+          if (custSnap.exists()) {
+            const custData = custSnap.data();
+            const prevCustPaid = Number(custData.totalPaid) || 0;
+            const prevCustSpent = Number(custData.totalSpent) || 0;
+            const updatedCustPaid = prevCustPaid + paymentAmount;
+            const updatedCustPending = Math.max(0, prevCustSpent - updatedCustPaid);
+
+            await updateDoc(custRef, {
+              totalPaid: updatedCustPaid,
+              pendingBalance: updatedCustPending,
+              updatedAt: nowIso
+            });
+          }
+        } catch (custUpdateErr) {
+          console.error("Failed to update customer stats in /record-payment:", custUpdateErr);
+        }
+      }
+
+      return respond({
+        id: billRef.id,
+        success: true,
+        amountPaid: newAmountPaid,
+        balance: newBalance,
+        status: newStatus,
+        paymentHistory: updatedHistory
+      });
+    }
+    if (url.includes('/billing/') && (url.endsWith('/pay') || url.includes('/pay?')) && method === 'patch') {
       const id = url.split('/').slice(-2, -1)[0];
       const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const nowIso = new Date().toISOString();
+      parsedData.updatedAt = nowIso;
+      if (!parsedData.createdAt) parsedData.createdAt = nowIso;
+      if (!parsedData.date) parsedData.date = nowIso;
       await updateDoc(doc(db, 'bills', id), { ...parsedData, status: 'PAID' });
       
       // Auto-deduct stock for products
@@ -437,6 +698,31 @@ const firestoreAdapter = async (config: any) => {
                   createdAt: new Date().toISOString()
                 });
               }
+            }
+          }
+        }
+
+        // Record staff commissions on payment if applicable
+        for (const item of parsedData.items) {
+          const itemStaffId = item.staffId || parsedData.staffId;
+          const commAmt = Number(item.staffCommissionAmount) || 0;
+          if (commAmt > 0 && itemStaffId) {
+            try {
+              await addDoc(collection(db, 'staff_commissions'), {
+                staffId: itemStaffId,
+                staffName: item.staffName || '',
+                billId: id,
+                date: nowIso,
+                createdAt: nowIso,
+                amount: parsedData.finalAmount,
+                commissionAmount: commAmt,
+                staffCommissionAmount: commAmt,
+                serviceId: item.serviceId || '',
+                serviceName: item.productName || item.name || '',
+                status: 'UNPAID'
+              });
+            } catch (scErr) {
+              console.error("Failed to add commission on pay:", scErr);
             }
           }
         }
@@ -529,12 +815,32 @@ const firestoreAdapter = async (config: any) => {
                 const prevPaid = Number(custData.totalPaid) || 0;
                 const prevVisits = Number(custData.visitCount) || 0;
 
+                const earnedPoints = Number(billData.loyaltyPointsEarned) || 0;
+                const redeemedPoints = Number(billData.loyaltyPointsRedeemed) || 0;
+                const prevLoyalty = Number(custData.loyaltyPoints) || 0;
+                const newLoyalty = Math.max(0, prevLoyalty - earnedPoints + redeemedPoints);
+
                 await updateDoc(doc(db, 'customers', linkedCustomerId), {
                   totalSpent: Math.max(0, prevSpent - billTotal),
                   totalPaid: Math.max(0, prevPaid - billPaid),
                   pendingBalance: Math.max(0, (prevSpent - billTotal) - (prevPaid - billPaid)),
                   visitCount: Math.max(0, prevVisits - 1),
+                  loyaltyPoints: newLoyalty
                 });
+
+                // Record loyalty reversal in ledger
+                if (earnedPoints > 0 || redeemedPoints > 0) {
+                  await addDoc(collection(db, 'loyalty_transactions'), {
+                    customerId: linkedCustomerId,
+                    billId: id,
+                    type: 'LOYALTY_REVERSAL',
+                    pointsEarnedReversed: earnedPoints,
+                    pointsRedeemedRestored: redeemedPoints,
+                    netPointsChange: redeemedPoints - earnedPoints,
+                    reason: `${action === 'CANCELLED' ? 'Cancellation' : 'Refund'} of Bill #${id}`,
+                    createdAt: new Date().toISOString()
+                  });
+                }
               }
             } catch (cErr) {
               console.error("Failed to revert customer stats on refund/cancel:", cErr);
@@ -651,11 +957,18 @@ const firestoreAdapter = async (config: any) => {
       return respond({ id: ref.id, ...parsedData });
     }
     if (url.includes('/staff/commissions/') && url.includes('/pay') && method === 'patch') {
+      const urlObj = new URL('http://localhost' + url);
+      const paymentMethod = urlObj.searchParams.get('paymentMethod') || 'CASH';
       const parts = url.split('?')[0].split('/');
       // /staff/commissions/:id/pay
       const id = parts[parts.length - 2];
-      await updateDoc(doc(db, 'staff_commissions', id), { status: 'PAID' });
-      return respond({ id, status: 'PAID' });
+      await updateDoc(doc(db, 'staff_commissions', id), {
+        status: 'PAID',
+        paidDate: new Date().toISOString(),
+        paymentMethod: paymentMethod,
+        updatedAt: new Date().toISOString()
+      });
+      return respond({ id, status: 'PAID', paidDate: new Date().toISOString(), paymentMethod });
     }
     
     // Appointments
@@ -835,10 +1148,69 @@ const firestoreAdapter = async (config: any) => {
       return respond({ id: ref.id, ...parsedData });
     }
     if (url.includes('/customer-packages/use/') && method === 'patch') {
-      const id = url.split('/use/')[1];
+      const id = url.split('/use/')[1]?.split('?')[0];
       const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-      const { serviceId, qty } = parsedData;
-      return respond({ id, success: true, dummy: true }); // A full implementation needs doc reads
+      const { serviceId } = parsedData;
+      const qtyToUse = Math.max(1, Number(parsedData.qty) || 1);
+
+      if (!id) return respond({ error: 'Package ID missing' }, 400);
+
+      const pkgRef = doc(db, 'customer_packages', id);
+      const pkgSnap = await getDoc(pkgRef);
+      if (!pkgSnap.exists()) {
+        return respond({ error: 'Customer package not found' }, 404);
+      }
+
+      const pkgData = pkgSnap.data();
+      const items = Array.isArray(pkgData.items) ? [...pkgData.items] : [];
+      const itemIndex = items.findIndex((it: any) => it.serviceId === serviceId);
+
+      if (itemIndex === -1) {
+        return respond({ error: 'Service not found in this package' }, 400);
+      }
+
+      const currentItem = items[itemIndex];
+      const totalQty = Number(currentItem.totalQuantity) || 0;
+      const currentUsed = Number(currentItem.usedQuantity) || 0;
+      const remaining = totalQty - currentUsed;
+
+      if (remaining < qtyToUse) {
+        return respond({ error: `Cannot redeem: Only ${remaining} session(s) remaining` }, 400);
+      }
+
+      const newUsed = currentUsed + qtyToUse;
+      items[itemIndex] = {
+        ...currentItem,
+        usedQuantity: newUsed
+      };
+
+      const allCompleted = items.every((it: any) => (Number(it.usedQuantity) || 0) >= (Number(it.totalQuantity) || 0));
+      const nowIso = new Date().toISOString();
+
+      const redemptionEntry = {
+        serviceId,
+        serviceName: currentItem.serviceName || 'Service',
+        quantity: qtyToUse,
+        redeemedAt: nowIso
+      };
+
+      const existingHistory = Array.isArray(pkgData.redemptionHistory) ? pkgData.redemptionHistory : [];
+      const updatedHistory = [...existingHistory, redemptionEntry];
+
+      await updateDoc(pkgRef, {
+        items,
+        isActive: !allCompleted,
+        redemptionHistory: updatedHistory,
+        updatedAt: nowIso
+      });
+
+      return respond({
+        id,
+        success: true,
+        items,
+        isActive: !allCompleted,
+        redemptionHistory: updatedHistory
+      });
     }
 
     // Default fallback for unmapped endpoints to prevent crashes
@@ -876,11 +1248,18 @@ export interface Appointment {
   customerName: string;
   customerPhone: string;
   serviceIds: string[];
+  serviceNames?: string[];
+  serviceName?: string;
   staffId?: string;
+  staffName?: string;
   date: string; // YYYY-MM-DD
   time: string; // HH:mm
-  status: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+  startTime?: string;
+  endTime?: string;
+  durationMinutes?: number;
+  status: 'SCHEDULED' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
   notes?: string;
+  billId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -888,9 +1267,12 @@ export interface Appointment {
 export interface Staff {
   id: string;
   name: string;
+  email?: string;
   phone: string;
   emergencyPhone?: string;
   role: string;
+  hasLoginAccount?: boolean;
+  authUid?: string;
   isActive: boolean; // Added for compatibility
   createdAt?: string;
   baseSalary?: number;
@@ -1138,6 +1520,10 @@ export interface Product {
   batchNumber?: string;
   expiryDate?: string;
   unit?: string;
+  vendorNickname?: string;
+  series?: any;
+  hashtagNumber?: string | number;
+  systemType?: string;
 }
 
 // Helper to map Backend Product to Frontend Product (handling alias)
@@ -1186,7 +1572,7 @@ const mapProductToBackend = (p: Partial<Product>): any => {
   
   const finalPrice = parseFloat((sellingPrice != null && Number(sellingPrice) > 0) ? sellingPrice as any : (price != null && Number(price) > 0 ? price as any : 0)) || 0;
 
-  const hasTrackedStock = stockQuantity !== null && stockQuantity !== undefined && stockQuantity !== '';
+  const hasTrackedStock = stockQuantity !== null && stockQuantity !== undefined && (stockQuantity as any) !== '';
   const finalTracking = inventoryTracking === 'NOT_TRACKED' ? 'NOT_TRACKED' : (inventoryTracking || (hasTrackedStock ? 'TRACKED' : 'NOT_TRACKED'));
   const finalStock = finalTracking === 'NOT_TRACKED' ? null : (parseInt(stockQuantity as any || 0, 10) || 0);
 
@@ -1328,8 +1714,14 @@ export interface BillDetails {
   staffId?: string;
   staffName?: string;
   quantity: number;
+  qty?: number;
   productName: string; // Used for both product and service names backward compatible
+  name?: string;
+  serviceName?: string;
   unitPrice: number;
+  price?: number;
+  total?: number;
+  staffCommissionAmount?: number;
   gstRate: number;
   discountRate: number;
   subtotal?: number;
@@ -1353,6 +1745,9 @@ export interface Bill {
   id?: string;
   invoiceId?: string;
   invoiceNumber?: string;
+  date?: string;
+  estimationId?: string;
+  totalAmount?: number;
   status?: string; 
   customerId?: string; 
   customerName: string;
@@ -1539,10 +1934,16 @@ export interface DayBookSummaryResponse {
 }
 
 export interface CashTally {
+  id?: string;
   date: string; // YYYY-MM-DD
   openingBalance: number;
-  denominations: { [key: string]: number }; // e.g., "500": 10
+  expectedCash?: number;
   totalCashHand: number;
+  difference?: number;
+  denominations: { [key: string]: number }; // e.g., "500": 10
+  closedAt?: string;
+  closedBy?: string;
+  isClosed?: boolean;
 }
 
 export const daybookApi = {
@@ -1572,18 +1973,24 @@ export const daybookApi = {
 
 
 export interface Commission {
-  id: string;
+  id?: string;
   brokerId?: string;
   staffId?: string;
   staffName?: string;
-  billId: string;
-  date: string;
+  billId?: string;
+  billNo?: string;
+  serviceId?: string;
+  serviceName?: string;
+  date?: string;
   amount: number; // Sale amount
   commissionAmount?: number; // Broker commission
   staffCommissionAmount?: number; // Staff commission
+  percentage?: number;
   status: 'UNPAID' | 'PAID';
   paidDate?: string;
   paymentMethod?: string; // Cash | UPI | Card — used for expense bucketing
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 
@@ -1695,6 +2102,7 @@ export const customerPackageApi = {
   getByCustomer: (customerId: string) => productService.get<CustomerPackage[]>(`/customer-packages/customer/${customerId}`),
   add: (data: Partial<CustomerPackage>) => productService.post('/customer-packages/add', data),
   updateUsage: (id: string, serviceId: string, qty: number) => productService.patch(`/customer-packages/use/${id}`, { serviceId, qty }),
+  usePackage: (id: string, serviceId: string, qty: number) => productService.patch(`/customer-packages/use/${id}`, { serviceId, qty }),
 };
 
 // --- Settings API ---
@@ -1706,6 +2114,13 @@ export interface GlobalSettings {
   loyaltyEnabled: boolean;
   loyaltySpendRatio: number;
   loyaltyRedeemValue: number;
+  addressLine1?: string;
+  addressLine2?: string;
+  contactNo?: string;
+  bankName?: string;
+  accountNo?: string;
+  ifscCode?: string;
+  branchName?: string;
 }
 
 export const settingsApi = {

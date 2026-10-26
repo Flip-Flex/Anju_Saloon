@@ -1,13 +1,13 @@
 export const APP_CONFIG = {
     COMPANY_NAME: "Anjus Beauty Saloon",
-    COMPANY_LEGAL_NAME: "Anjus Beauty Saloon", // Assuming same
-    ADDRESS_LINE_1: "TESTING ADDRESSS",
+    COMPANY_LEGAL_NAME: "Anjus Beauty Saloon",
+    ADDRESS_LINE_1: "No. 12, Gandhi Road",
     ADDRESS_LINE_2: "Kanchipuram - 631501",
-    CONTACT_NO: "+91 9994411111",
-    GSTIN: "TEST-0000001",
+    CONTACT_NO: "+91 99944 11111",
+    GSTIN: "33ADFPN7561FL1ZK",
     ACCOUNT_NAME: "Anjus Beauty Saloon",
-    ACCOUNT_NO: "TEST-0000001",
-    BANK_NAME: "TEST-0000001",
-    BRANCH_NAME: "Kancheepuram", // Inferred from address/context
-    IFSC_CODE: "TEST-0000001"
+    ACCOUNT_NO: "921020012345678",
+    BANK_NAME: "Axis Bank",
+    BRANCH_NAME: "Kanchipuram Branch",
+    IFSC_CODE: "UTIB0001234"
 };

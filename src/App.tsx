@@ -1,7 +1,5 @@
-import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from 'react-hot-toast';
-import { productApi, salonServiceApi } from '@/lib/api';
 
 import Login from "./pages/Login";
 import BillView from "@/pages/BillView";
@@ -38,39 +36,6 @@ import { GlobalDataProvider } from "@/context/GlobalDataContext";
 import { NotificationProvider } from "@/context/NotificationContext";
 
 const App = () => {
-  useEffect(() => {
-    const seedDummyData = async () => {
-      if (!localStorage.getItem('dummyDataSeeded')) {
-        try {
-          await productApi.add({
-            name: "Dummy Shampoo",
-            category: "Hair Care",
-            price: 500,
-            purchaseRate: 250,
-            stockQuantity: 100,
-            barcode: "DUMMY001",
-            active: true
-          });
-          
-          await salonServiceApi.add({
-            name: "Dummy Haircut",
-            categoryId: "cat_hair",
-            price: 350,
-            duration: 30,
-            active: true,
-            description: "A quick dummy haircut service"
-          });
-          
-          localStorage.setItem('dummyDataSeeded', 'true');
-          console.log("Successfully added dummy product and service!");
-        } catch (e) {
-          console.error("Failed to seed dummy data", e);
-        }
-      }
-    };
-    seedDummyData();
-  }, []);
-
   return (
     <AuthProvider>
       <GlobalDataProvider>

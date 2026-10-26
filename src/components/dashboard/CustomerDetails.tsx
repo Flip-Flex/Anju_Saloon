@@ -59,7 +59,7 @@ const CustomerDetails = () => {
                             return true;
                         }
                     }
-                    if (found.name && b.customerName && b.customerName.trim().toLowerCase() === found.name.trim().toLowerCase()) {
+                    if (found.name && b.customerName && b.customerName.toString().trim().toLowerCase() === found.name.toString().trim().toLowerCase()) {
                         return true;
                     }
                     return false;
@@ -176,7 +176,7 @@ const CustomerDetails = () => {
 
     // Prepare product list from all bills
     const allProducts = customerBills.flatMap(bill =>
-        bill.items.map(item => ({
+        (bill.items || []).map(item => ({
             ...item,
             billId: bill.id,
             billInvoiceId: bill.invoiceNumber || bill.invoiceId || bill.id,
@@ -363,40 +363,66 @@ const CustomerDetails = () => {
                                             <div className="flex justify-between items-start mb-4">
                                                 <div>
                                                     <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase mb-2 ${pkg.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                                                        {pkg.isActive ? 'ACTIVE' : 'INACTIVE'}
+                                                        {pkg.isActive ? 'ACTIVE' : 'EXHAUSTED / INACTIVE'}
                                                     </span>
                                                     <h3 className="font-black text-xl text-gray-900 leading-tight">{pkg.packageName}</h3>
                                                 </div>
                                             </div>
                                             
                                             <div className="space-y-3 mt-4">
-                                                {pkg.items?.map((item: any, idx: number) => {
-                                                    const remaining = item.totalQuantity - item.usedQuantity;
-                                                    const percentage = Math.round((item.usedQuantity / item.totalQuantity) * 100);
-                                                    return (
-                                                        <div key={idx} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                                                            <div className="flex justify-between items-center mb-1">
-                                                                <span className="text-sm font-bold text-gray-800 truncate pr-2">{item.serviceName}</span>
-                                                                <span className="text-xs font-black text-purple-600 bg-purple-100 px-2 py-0.5 rounded-md whitespace-nowrap">
-                                                                    {remaining} left
+                                                {(() => {
+                                                    const sessionItems = (pkg.remainingSessions || pkg.items || pkg.services || []).map((s: any) => ({
+                                                        serviceName: s.serviceName || s.name || 'Service',
+                                                        total: s.totalSessions ?? s.totalQuantity ?? s.sessions ?? 1,
+                                                        remaining: s.remainingSessions ?? (s.totalSessions ? s.totalSessions - (s.usedSessions || 0) : (s.totalQuantity ? s.totalQuantity - (s.usedQuantity || 0) : 0)),
+                                                        used: s.usedSessions ?? s.usedQuantity ?? 0
+                                                    }));
+
+                                                    return sessionItems.map((item: any, idx: number) => {
+                                                        const percentage = item.total > 0 ? Math.min(100, Math.round((item.used / item.total) * 100)) : 0;
+                                                        return (
+                                                            <div key={idx} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                                                                <div className="flex justify-between items-center mb-1">
+                                                                    <span className="text-sm font-bold text-gray-800 truncate pr-2">{item.serviceName}</span>
+                                                                    <span className="text-xs font-black text-purple-600 bg-purple-100 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                                                        {item.remaining} left
+                                                                    </span>
+                                                                </div>
+                                                                <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2 overflow-hidden">
+                                                                    <div 
+                                                                        className="bg-purple-500 h-1.5 rounded-full transition-all" 
+                                                                        style={{ width: `${percentage}%` }}
+                                                                    ></div>
+                                                                </div>
+                                                                <div className="text-[10px] text-gray-400 mt-1 font-medium text-right">
+                                                                    {item.used} / {item.total} used
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    });
+                                                })()}
+                                            </div>
+
+                                            {/* Redemption History Accordion / List if present */}
+                                            {Array.isArray(pkg.redemptionHistory) && pkg.redemptionHistory.length > 0 && (
+                                                <div className="mt-3 pt-3 border-t border-purple-50">
+                                                    <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Redemption History</div>
+                                                    <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar text-xs">
+                                                        {pkg.redemptionHistory.map((rh: any, rhIdx: number) => (
+                                                            <div key={rhIdx} className="flex justify-between items-center text-gray-600 bg-purple-50/50 px-2 py-1 rounded">
+                                                                <span className="truncate">{rh.serviceName || 'Session used'}</span>
+                                                                <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                                                                    {rh.date ? new Date(rh.date).toLocaleDateString() : 'Redeemed'}
                                                                 </span>
                                                             </div>
-                                                            <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
-                                                                <div 
-                                                                    className="bg-purple-500 h-1.5 rounded-full" 
-                                                                    style={{ width: `${percentage}%` }}
-                                                                ></div>
-                                                            </div>
-                                                            <div className="text-[10px] text-gray-400 mt-1 font-medium text-right">
-                                                                {item.usedQuantity} / {item.totalQuantity} used
-                                                            </div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                             
                                             <div className="mt-4 pt-4 border-t border-purple-50 flex items-center justify-between text-xs font-medium text-gray-500">
-                                                <span>Purchased: {new Date(pkg.purchaseDate).toLocaleDateString()}</span>
+                                                <span>Active: {pkg.activationDate || pkg.purchaseDate || pkg.createdAt ? new Date(pkg.activationDate || pkg.purchaseDate || pkg.createdAt).toLocaleDateString() : 'Active'}</span>
+                                                {pkg.expiryDate && <span>Expires: {new Date(pkg.expiryDate).toLocaleDateString()}</span>}
                                             </div>
                                         </div>
                                     </div>
@@ -454,6 +480,8 @@ const CustomerDetails = () => {
 
 const PurchaseCard = ({ item, billId, navigate }: { item: any, billId: string | null, navigate: any }) => {
     const isCurrentlyReminded = billId === item.billId;
+    const itemAmount = Number(item.netAmount || item.total || (Number(item.price || 0) * Number(item.qty || 1)) || 0);
+
     return (
         <div
             className={`group bg-white rounded-[2rem] border-2 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden relative
@@ -474,7 +502,7 @@ const PurchaseCard = ({ item, billId, navigate }: { item: any, billId: string | 
                     <div className="space-y-1">
                         <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Bill #{item.billInvoiceId}</p>
                         <h3 className="text-xl font-black text-gray-900 leading-tight group-hover:text-blue-600 transition-colors">
-                            {item.productName}
+                            {item.productName || item.name || item.serviceName || 'Unknown Item'}
                         </h3>
                     </div>
                 </div>
@@ -483,12 +511,12 @@ const PurchaseCard = ({ item, billId, navigate }: { item: any, billId: string | 
                     <div className="grid grid-cols-2 gap-4">
                         <div className="bg-gray-50 rounded-2xl p-3">
                             <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Total Amount</p>
-                            <p className="font-black text-gray-900">₹{(item.netAmount || 0).toFixed(2)}</p>
+                            <p className="font-black text-gray-900">₹{itemAmount.toFixed(2)}</p>
                         </div>
                         <div className="bg-green-50 rounded-2xl p-3">
                             <p className="text-[9px] font-black text-green-400 uppercase mb-1">Paid (Share)</p>
                             <p className="font-black text-green-700">
-                                ₹{item.netAmount && item.totalBillAmount ? (((item.paidBillAmount || 0) / (item.totalBillAmount || 1)) * (item.netAmount || 0)).toFixed(2) : '0.00'}
+                                ₹{(((item.paidBillAmount || 0) / (item.totalBillAmount || 1)) * itemAmount).toFixed(2)}
                             </p>
                         </div>
                     </div>

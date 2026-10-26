@@ -12,7 +12,6 @@ interface ProductRow {
     id: string;
     name: string;
     category: string;
-    category: string;
     purchaseRate: number;
     baseBuyingPrice: number;
     purchaseGst: number;
@@ -50,7 +49,7 @@ const MultiProductFormModal = ({ vendors, categories, onSave, onClose, defaultGs
     const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
 
     const generatePrefixedId = () => {
-        return `MSRE${generateSixDigitId()}`;
+        return `ANJU${generateSixDigitId()}`;
     };
 
     // Input Row State

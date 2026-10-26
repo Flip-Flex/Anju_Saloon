@@ -26,7 +26,7 @@ export const useCachedResource = <T>(
     options: CacheOptions<T> = {}
 ): CachedResource<T> => {
     const { ttl = 5 * 60 * 1000, skip = false } = options;
-    const CACHE_KEY_PREFIX = 'RAJU_CACHE_V2_';
+    const CACHE_KEY_PREFIX = 'ANJU_SALOON_CACHE_V1_';
     const fullKey = `${CACHE_KEY_PREFIX}${key}`;
 
     // State

@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   TrendingUp, TrendingDown, DollarSign, ShoppingCart,
-  Package, AlertTriangle, Download, Users, Check, X, Pencil, Calendar
+  Package, AlertTriangle, Download, Users, Check, X, Pencil, Calendar,
+  Crown, Award, Medal, Sparkles, Scissors, Flame, ArrowUpRight, UserCheck, Star,
+  Search, Filter
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -24,7 +26,7 @@ const DashboardOverview = () => {
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [dashboardView, setDashboardView] = useState<DashboardPeriod>('month');
+  const [dashboardView, setDashboardView] = useState<DashboardPeriod>('day');
   const [isLowStockModalOpen, setIsLowStockModalOpen] = useState(false);
 
   // Raw data
@@ -42,6 +44,12 @@ const DashboardOverview = () => {
   const [editValues, setEditValues] = useState<{ purchaseRate: number, sellingPrice: number }>({ purchaseRate: 0, sellingPrice: 0 });
   const [selectedProductDetails, setSelectedProductDetails] = useState<any | null>(null);
   const [priceMarginSearch, setPriceMarginSearch] = useState("");
+  
+  // Analytics section UI state
+  const [analyticsTab, setAnalyticsTab] = useState<'products' | 'services'>('products');
+  const [productSearchTerm, setProductSearchTerm] = useState("");
+  const [productSortBy, setProductSortBy] = useState<'qty' | 'revenue' | 'margin'>('qty');
+  const [staffSearchTerm, setStaffSearchTerm] = useState("");
 
   const getDateRange = (view: DashboardPeriod) => {
     const now = new Date();
@@ -121,9 +129,28 @@ const DashboardOverview = () => {
         if (Array.isArray(custRes.data)) setCustomers(custRes.data);
         if (Array.isArray(staffRes.data)) setStaff(staffRes.data);
         
-        // Real-time listener for bills
+        // Real-time listener for bills with normalization
         unsubscribeBills = onSnapshot(collection(db, 'bills'), (snap) => {
-          setBills(snap.docs.map(d => ({ ...d.data(), id: d.id })) as Bill[]);
+          setBills(snap.docs.map(d => {
+            const data = d.data();
+            let createdAt = data.createdAt || data.date || data.billDate;
+            if (createdAt && typeof createdAt === 'object') {
+              const s = createdAt.seconds ?? createdAt._seconds;
+              if (s !== undefined) createdAt = new Date(s * 1000).toISOString();
+              else if (typeof createdAt.toDate === 'function') createdAt = createdAt.toDate().toISOString();
+            }
+            if (!createdAt) createdAt = new Date().toISOString();
+            const finalAmt = Number(data.finalAmount ?? data.totalAmount ?? data.amountPaid ?? 0);
+            return {
+              ...data,
+              id: d.id,
+              createdAt,
+              date: data.date || createdAt,
+              finalAmount: finalAmt,
+              totalAmount: Number(data.totalAmount ?? finalAmt),
+              invoiceNumber: data.invoiceNumber || data.invoiceId || d.id
+            };
+          }) as unknown as Bill[]);
         });
 
         // Real-time listener for daybook (expenses)
@@ -145,6 +172,32 @@ const DashboardOverview = () => {
     };
   }, []);
 
+  // Safe date parser for bills
+  const parseBillDate = (bill: any): Date => {
+    const val = bill?.createdAt || bill?.date || bill?.billDate || bill?.timestamp;
+    if (!val) return new Date();
+    if (val instanceof Date) return val;
+    if (typeof val === 'object') {
+      const s = val.seconds ?? val._seconds;
+      if (s !== undefined) return new Date(s * 1000);
+      if (typeof val.toDate === 'function') return val.toDate();
+    }
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? new Date() : d;
+  };
+
+  // Helper to reliably identify salon services vs retail cosmetics
+  const checkIsService = (item: any): boolean => {
+    if (!item) return false;
+    const type = String(item.type || '').toUpperCase();
+    if (type === 'SERVICE') return true;
+    if (item.serviceId) return true;
+    const cat = String(item.category || '').toLowerCase();
+    if (cat === 'service' || cat === 'salon services' || cat.includes('service')) return true;
+    const name = String(item.productName || item.name || item.serviceName || '').toLowerCase();
+    return /haircut|styling|facial|shaving|shave|beard|coloring|hair spa|spa|pedicure|manicure|massage|bridal|bleach|cleanup|threading|waxing|treatment/i.test(name);
+  };
+
   // Filter bills based on time range (Global for charts)
   const dateFilteredBills = useMemo(() => {
     const start = startOfDay(new Date(startDate));
@@ -152,7 +205,7 @@ const DashboardOverview = () => {
 
     return bills.filter(bill => {
       if (bill.status === 'CANCELLED' || bill.status === 'HOLD' || bill.status === 'REFUNDED') return false;
-      const billDate = new Date(bill.createdAt || new Date());
+      const billDate = parseBillDate(bill);
       return billDate >= start && billDate <= end;
     });
   }, [bills, startDate, endDate]);
@@ -165,16 +218,21 @@ const DashboardOverview = () => {
     return products;
   }, [products]);
 
-  // Helper to aggregate chart data
-  const aggregateChartData = (view: DashboardPeriod, rawData: any[], start: Date) => {
+  // Helper to aggregate chart data across views
+  const aggregateChartData = (view: DashboardPeriod, rawData: { date: string; income: number; expense: number }[]) => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
     if (view === 'year') {
+      // 12 Months of the current year (Jan to Dec)
       const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const monthlyAgg: Record<string, { income: number; expense: number }> = {};
       months.forEach(m => monthlyAgg[m] = { income: 0, expense: 0 });
 
-      rawData.forEach((d: any) => {
+      rawData.forEach((d) => {
         const dDate = new Date(d.date);
-        if (!isNaN(dDate.getTime())) {
+        if (!isNaN(dDate.getTime()) && dDate.getFullYear() === currentYear) {
           const mName = months[dDate.getMonth()];
           if (monthlyAgg[mName]) {
             monthlyAgg[mName].income += (d.income || 0);
@@ -182,20 +240,40 @@ const DashboardOverview = () => {
           }
         }
       });
-      return months.map(m => ({ date: m, income: monthlyAgg[m].income, expense: monthlyAgg[m].expense }));
+      return months.map(m => ({
+        date: m,
+        income: Math.round(monthlyAgg[m].income),
+        expense: Math.round(monthlyAgg[m].expense)
+      }));
     } else if (view === 'month') {
-      const fullMonthData = [];
-      const dataMap = new Map();
-      rawData.forEach((d: any) => {
-        const dayNum = new Date(d.date).getDate();
-        dataMap.set(dayNum, d);
+      // 12 Months comparison or days of current month
+      const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      const dayMap = new Map<number, { income: number; expense: number }>();
+
+      rawData.forEach((d) => {
+        const dDate = new Date(d.date);
+        if (!isNaN(dDate.getTime()) && dDate.getMonth() === currentMonth && dDate.getFullYear() === currentYear) {
+          const dayNum = dDate.getDate();
+          const prev = dayMap.get(dayNum) || { income: 0, expense: 0 };
+          dayMap.set(dayNum, {
+            income: prev.income + (d.income || 0),
+            expense: prev.expense + (d.expense || 0)
+          });
+        }
       });
-      for (let i = 1; i <= 31; i++) {
-        const dayData = dataMap.get(i);
-        fullMonthData.push({ date: i.toString(), income: dayData?.income || 0, expense: dayData?.expense || 0 });
+
+      const fullMonthData = [];
+      for (let i = 1; i <= daysInCurrentMonth; i++) {
+        const dayData = dayMap.get(i);
+        fullMonthData.push({
+          date: i.toString(),
+          income: Math.round(dayData?.income || 0),
+          expense: Math.round(dayData?.expense || 0)
+        });
       }
       return fullMonthData;
     } else if (view === 'week') {
+      // 5 Weeks of the current month
       const weeksData = [
         { date: '1st Week', income: 0, expense: 0 },
         { date: '2nd Week', income: 0, expense: 0 },
@@ -203,27 +281,44 @@ const DashboardOverview = () => {
         { date: '4th Week', income: 0, expense: 0 },
         { date: '5th Week', income: 0, expense: 0 }
       ];
-      rawData.forEach((d: any) => {
-        const dayNum = new Date(d.date).getDate();
-        let weekIdx = Math.floor((dayNum - 1) / 7);
-        if (weekIdx > 4) weekIdx = 4;
-        weeksData[weekIdx].income += (d.income || 0);
-        weeksData[weekIdx].expense += (d.expense || 0);
+      rawData.forEach((d) => {
+        const dDate = new Date(d.date);
+        if (!isNaN(dDate.getTime()) && dDate.getMonth() === currentMonth && dDate.getFullYear() === currentYear) {
+          const dayNum = dDate.getDate();
+          let weekIdx = Math.floor((dayNum - 1) / 7);
+          if (weekIdx > 4) weekIdx = 4;
+          weeksData[weekIdx].income += (d.income || 0);
+          weeksData[weekIdx].expense += (d.expense || 0);
+        }
       });
-      return weeksData;
-    } else { // day
+      return weeksData.map(w => ({
+        ...w,
+        income: Math.round(w.income),
+        expense: Math.round(w.expense)
+      }));
+    } else {
+      // 'day' view: All 7 days of the current week (Monday through Sunday)
+      const weekStart = startOfWeek(now, { weekStartsOn: 1 });
       const fullWeekData = [];
-      const dataMap = new Map();
-      rawData.forEach((d: any) => {
-        const dayStr = format(new Date(d.date), 'EEE');
-        dataMap.set(dayStr, d);
+      const dataMap = new Map<string, { income: number; expense: number }>();
+      rawData.forEach((d) => {
+        const dDate = new Date(d.date);
+        if (!isNaN(dDate.getTime())) {
+          const dayKey = format(dDate, 'yyyy-MM-dd');
+          dataMap.set(dayKey, d);
+        }
       });
-      for (let i = 0; i < 6; i++) {
-        const currentDay = addDays(start, i);
-        const dayStr = format(currentDay, 'EEE');
-        const fullDayName = format(currentDay, 'EEEE');
-        const dayData = dataMap.get(dayStr);
-        fullWeekData.push({ date: fullDayName, income: dayData?.income || 0, expense: dayData?.expense || 0 });
+
+      for (let i = 0; i < 7; i++) {
+        const currentDay = addDays(weekStart, i);
+        const dayKey = format(currentDay, 'yyyy-MM-dd');
+        const shortDay = format(currentDay, 'EEE (dd)');
+        const dayData = dataMap.get(dayKey);
+        fullWeekData.push({
+          date: shortDay,
+          income: Math.round(dayData?.income || 0),
+          expense: Math.round(dayData?.expense || 0)
+        });
       }
       return fullWeekData;
     }
@@ -237,17 +332,65 @@ const DashboardOverview = () => {
     try {
       const rawDataMap = new Map<string, { date: string, income: number, expense: number }>();
       
-      dateFilteredBills.forEach(b => {
-        const bDate = b.createdAt ? new Date(b.createdAt) : new Date();
+      const productMap = new Map(products.map(p => [p.name.toLowerCase().trim(), p]));
+      const productIdMap = new Map(products.map(p => [p.id, p]));
+
+      // 1. Process all non-cancelled bills to calculate real earnings and cost/commission expenses
+      bills.forEach(b => {
+        if (b.status === 'CANCELLED' || b.status === 'HOLD' || b.status === 'REFUNDED') return;
+        const bDate = parseBillDate(b);
         const dateStr = format(bDate, 'yyyy-MM-dd');
         if (!rawDataMap.has(dateStr)) {
           rawDataMap.set(dateStr, { date: dateStr, income: 0, expense: 0 });
         }
-        rawDataMap.get(dateStr)!.income += (Number(b.finalAmount) || Number(b.totalAmount) || 0);
+        
+        const finalAmt = Number(b.finalAmount ?? b.totalAmount ?? b.amountPaid ?? 0);
+        rawDataMap.get(dateStr)!.income += finalAmt;
+
+        // Calculate product COGS and staff commissions for this bill
+        let billCost = 0;
+        let billComm = Number(b.staffCommissionAmount) || 0;
+        let itemsComm = 0;
+
+        b.items?.forEach((item: any) => {
+          const isService = checkIsService(item);
+          const q = Number(item.quantity ?? item.qty ?? 1);
+          const price = Number(item.unitPrice ?? item.price ?? 0);
+
+          if (!isService) {
+            const prod = productIdMap.get(item.productId) || productMap.get((item.productName || item.name || '').toLowerCase().trim());
+            if (prod) {
+              billCost += (Number(prod.purchaseRate) || 0) * q;
+            } else if (item.purchaseRate && Number(item.purchaseRate) > 0) {
+              billCost += Number(item.purchaseRate) * q;
+            } else {
+              billCost += (price * q) * 0.5; // default 50% wholesale margin if unrecorded
+            }
+          }
+
+          if (item.staffCommissionAmount) {
+            itemsComm += Number(item.staffCommissionAmount);
+          }
+        });
+
+        const totalCommissionForBill = itemsComm > 0 ? itemsComm : billComm;
+        rawDataMap.get(dateStr)!.expense += (billCost + totalCommissionForBill);
       });
 
+      // 2. Process all daybook expenses (rent, utilities, salon supplies, tea/coffee, etc.)
       expenses.forEach(e => {
-        const eDate = e.date ? new Date(e.date) : new Date();
+        const rawDate = e.date || (e as any).createdAt;
+        let eDate: Date;
+        if (rawDate && typeof rawDate === 'object') {
+          const s = (rawDate as any).seconds ?? (rawDate as any)._seconds;
+          eDate = s !== undefined ? new Date(s * 1000) : new Date();
+        } else if (rawDate) {
+          eDate = new Date(rawDate);
+        } else {
+          eDate = new Date();
+        }
+        if (isNaN(eDate.getTime())) eDate = new Date();
+
         const dateStr = format(eDate, 'yyyy-MM-dd');
         if (!rawDataMap.has(dateStr)) {
           rawDataMap.set(dateStr, { date: dateStr, income: 0, expense: 0 });
@@ -256,12 +399,11 @@ const DashboardOverview = () => {
       });
 
       const rawData = Array.from(rawDataMap.values());
-      const start = startOfDay(new Date(startDate));
 
-      const dayData = aggregateChartData('day', rawData, start);
-      const weekData = aggregateChartData('week', rawData, start);
-      const monthData = aggregateChartData('month', rawData, start);
-      const yearData = aggregateChartData('year', rawData, start);
+      const dayData = aggregateChartData('day', rawData);
+      const weekData = aggregateChartData('week', rawData);
+      const monthData = aggregateChartData('month', rawData);
+      const yearData = aggregateChartData('year', rawData);
 
       setAllPeriodsData({ day: dayData, week: weekData, month: monthData, year: yearData });
 
@@ -273,9 +415,7 @@ const DashboardOverview = () => {
     } catch (err) {
       console.log("Chart data calculation issue: ", err);
     }
-  }, [dashboardView, startDate, endDate, dateFilteredBills, expenses]);
-
-
+  }, [dashboardView, bills, expenses, products]);
 
   // KPIs
   const { totalRevenue, totalTransactions, totalProfit, totalCOGS, serviceRevenue, productRevenue, totalCommission } = useMemo(() => {
@@ -287,34 +427,46 @@ const DashboardOverview = () => {
     let comm = 0;
 
     // Create a product map for quick lookup
-    const productMap = new Map(products.map(p => [p.name, p]));
+    const productMap = new Map(products.map(p => [p.name.toLowerCase().trim(), p]));
     const productIdMap = new Map(products.map(p => [p.id, p]));
 
     filteredBills.forEach(bill => {
-      const finalAmt = bill.finalAmount || bill.amountPaid || 0;
+      const finalAmt = Number(bill.finalAmount ?? bill.totalAmount ?? bill.amountPaid ?? 0);
       rev += finalAmt;
 
-      comm += Number(bill.staffCommissionAmount) || 0;
-
-      // Estimate profit and COGS
+      let billComm = Number(bill.staffCommissionAmount) || 0;
+      let itemsComm = 0;
       let billCost = 0;
-      bill.items?.forEach(item => {
-        const prod = productIdMap.get(item.productId) || productMap.get(item.productName);
-        if (prod) {
-          billCost += (prod.purchaseRate || 0) * item.quantity;
-        } else {
-          // rough estimate if product not found (30% margin)
-          billCost += (item.unitPrice * item.quantity) * 0.7;
-        }
-        
-        const isService = item.type === 'SERVICE' || !!item.serviceId;
-        const itemNet = item.netAmount || (item.unitPrice * item.quantity - (item.discountAmount || 0));
-        
-        if (isService) sRev += itemNet;
-        else pRev += itemNet;
 
-        if (item.staffCommissionAmount) comm += Number(item.staffCommissionAmount);
+      bill.items?.forEach(item => {
+        const isService = checkIsService(item);
+        const q = Number(item.quantity ?? item.qty ?? 1);
+        const price = Number(item.unitPrice ?? item.price ?? 0);
+        const disc = Number(item.discountAmount ?? 0);
+        const itemNet = Number(item.netAmount ?? item.total ?? (price * q - disc));
+
+        if (isService) {
+          sRev += itemNet;
+          // Services have zero COGS
+        } else {
+          pRev += itemNet;
+          const prod = productIdMap.get(item.productId) || productMap.get((item.productName || item.name || '').toLowerCase().trim());
+          if (prod) {
+            billCost += (Number(prod.purchaseRate) || 0) * q;
+          } else if (item.purchaseRate && Number(item.purchaseRate) > 0) {
+            billCost += Number(item.purchaseRate) * q;
+          } else {
+            // Rough estimate for retail product without recorded cost
+            billCost += (price * q) * 0.7;
+          }
+        }
+
+        if (item.staffCommissionAmount) {
+          itemsComm += Number(item.staffCommissionAmount);
+        }
       });
+
+      comm += (itemsComm > 0 ? itemsComm : billComm);
       cogs += billCost;
       profit += (finalAmt - billCost);
     });
@@ -335,11 +487,17 @@ const DashboardOverview = () => {
     let upi = 0, cash = 0, card = 0, split = 0, partial = 0;
     filteredBills.forEach(b => {
       const method = (b.paymentMethod || 'Cash').toLowerCase();
-      if (method.includes('upi') || method.includes('online')) upi++;
-      else if (method.includes('split') || method.includes('mixed')) split++;
-      else if (method.includes('card')) card++;
-      else if (method.includes('partial')) partial++;
-      else cash++;
+      if (method.includes('split') || method.includes('mixed') || (method.includes('cash') && method.includes('upi'))) {
+        split++;
+      } else if (method.includes('upi') || method.includes('online')) {
+        upi++;
+      } else if (method.includes('card')) {
+        card++;
+      } else if (method.includes('partial')) {
+        partial++;
+      } else {
+        cash++;
+      }
     });
     return { upi, cash, card, split, partial };
   }, [filteredBills]);
@@ -356,24 +514,25 @@ const DashboardOverview = () => {
 
   const totalAppointmentsCount = dateFilteredAppointments.length;
 
-  // Product Analysis (Best Sellers & Pricing Insights)
-  const productPerformance = useMemo(() => {
+  // 1. Strictly Retail Product Performance (Excluding salon services)
+  const retailProductPerformance = useMemo(() => {
     const perf: Record<string, {
-      id: string,
-      name: string,
-      qtySold: number,
-      revenue: number,
-      category: string,
-      margin: number,
-      purchaseRate: number,
-      sellingPrice: number,
-      stock: number,
-      purchaseDate?: string,
-      hashtagNumber?: string
+      id: string;
+      barcode?: string;
+      name: string;
+      qtySold: number;
+      revenue: number;
+      category: string;
+      margin: number;
+      purchaseRate: number;
+      sellingPrice: number;
+      stock: number;
+      purchaseDate?: string;
+      hashtagNumber?: string;
     }> = {};
 
     const productMap = new Map<string, any>(products.map(p => [p.id, p] as [string, any]));
-    const productNameMap = new Map<string, any>(products.map(p => [p.name, p] as [string, any]));
+    const productNameMap = new Map<string, any>(products.map(p => [p.name.toLowerCase().trim(), p] as [string, any]));
     const productBarcodeMap = new Map<string, any>(
       products
         .filter(p => p.barcode)
@@ -382,33 +541,107 @@ const DashboardOverview = () => {
 
     filteredBills.forEach(bill => {
       bill.items?.forEach(item => {
-        const prod = productMap.get(item.productId) || productNameMap.get(item.productName) || productBarcodeMap.get(item.productId);
-        const pid = prod ? prod.id : item.productName;
+        const itemName = item.productName || item.name || 'Unknown Item';
+        const prod = productMap.get(item.productId) || productNameMap.get(itemName.toLowerCase().trim()) || productBarcodeMap.get(item.productId);
+        
+        // Exclude salon services using unified checkIsService
+        if (checkIsService(item) || checkIsService(prod)) return;
+
+        const pid = prod ? prod.id : (item.productId || itemName);
 
         if (!perf[pid]) {
-          const pr = prod?.purchaseRate || (item.unitPrice * 0.7);
-          const sp = prod?.sellingPrice || item.unitPrice;
+          const pr = prod?.purchaseRate || item.purchaseRate || (Number(item.price || item.unitPrice || 0) * 0.7);
+          const sp = prod?.sellingPrice || prod?.price || Number(item.price || item.unitPrice || 0);
           perf[pid] = {
-            id: prod?.id || 'N/A',
-            name: item.productName,
+            id: prod?.id || item.productId || 'N/A',
+            barcode: prod?.barcode || '',
+            name: prod?.name || itemName,
             qtySold: 0,
             revenue: 0,
-            category: prod?.category || 'General',
+            category: prod?.category || 'Retail Product',
             purchaseRate: pr,
             sellingPrice: sp,
             margin: sp > 0 ? ((sp - pr) / sp) * 100 : 0,
-            stock: prod?.stockQuantity || 0,
+            stock: prod?.stockQuantity ?? (prod?.quantity || 0),
             purchaseDate: prod?.purchaseDate || prod?.createdAt || '',
             hashtagNumber: prod?.hashtagNumber || prod?.id || ''
           };
         }
-        perf[pid].qtySold += item.quantity;
-        perf[pid].revenue += (item.unitPrice * item.quantity);
+
+        const q = Number(item.quantity ?? item.qty ?? 1);
+        const price = Number(item.price || item.unitPrice || 0);
+        const disc = Number(item.discountAmount || 0);
+        const itemNet = Number(item.netAmount || (price * q - disc));
+        perf[pid].qtySold += q;
+        perf[pid].revenue += itemNet;
       });
     });
 
     return Object.values(perf).sort((a, b) => b.qtySold - a.qtySold);
   }, [filteredBills, products]);
+
+  // 2. Salon Services Performance
+  const servicePerformance = useMemo(() => {
+    const perf: Record<string, {
+      id: string;
+      name: string;
+      timesPerformed: number;
+      revenue: number;
+      category: string;
+      avgPrice: number;
+    }> = {};
+
+    filteredBills.forEach(bill => {
+      bill.items?.forEach(item => {
+        const serviceName = item.productName || item.name || item.serviceName || 'Unknown Service';
+        if (!checkIsService(item)) return;
+
+        const sid = item.serviceId || item.productId || serviceName;
+
+        if (!perf[sid]) {
+          perf[sid] = {
+            id: sid,
+            name: serviceName,
+            timesPerformed: 0,
+            revenue: 0,
+            category: 'Salon Service',
+            avgPrice: Number(item.price || item.unitPrice || 0)
+          };
+        }
+
+        const q = Number(item.quantity ?? item.qty ?? 1);
+        const price = Number(item.price || item.unitPrice || 0);
+        const disc = Number(item.discountAmount || 0);
+        const itemNet = Number(item.netAmount || (price * q - disc));
+        perf[sid].timesPerformed += q;
+        perf[sid].revenue += itemNet;
+      });
+    });
+
+    return Object.values(perf).sort((a, b) => b.timesPerformed - a.timesPerformed);
+  }, [filteredBills]);
+
+  // Combined product performance fallback for existing references
+  const productPerformance = useMemo(() => {
+    if (retailProductPerformance.length > 0) return retailProductPerformance;
+    const perf: Record<string, any> = {};
+    products.forEach(p => {
+      perf[p.id] = {
+        id: p.id,
+        name: p.name,
+        qtySold: 0,
+        revenue: 0,
+        category: p.category || 'Cosmetics',
+        margin: p.sellingPrice && p.purchaseRate ? ((p.sellingPrice - p.purchaseRate) / p.sellingPrice) * 100 : 0,
+        purchaseRate: p.purchaseRate || 0,
+        sellingPrice: p.sellingPrice || 0,
+        stock: p.stockQuantity || 0,
+        purchaseDate: p.purchaseDate || p.createdAt || '',
+        hashtagNumber: p.hashtagNumber || p.id
+      };
+    });
+    return Object.values(perf);
+  }, [retailProductPerformance, products]);
 
   const topSellingProducts = useMemo(() => {
     return productPerformance.map(p => ({
@@ -417,6 +650,102 @@ const DashboardOverview = () => {
       chartLabel: p.name
     })).sort((a, b) => b.qtySold - a.qtySold);
   }, [productPerformance]);
+
+  // 3. Best Staff Performance Aggregation
+  const staffPerformance = useMemo(() => {
+    const staffMap = new Map<string, {
+      id: string;
+      name: string;
+      role: string;
+      phone: string;
+      servicesCount: number;
+      totalRevenue: number;
+      totalCommission: number;
+      appointmentsCount: number;
+      avgTicket: number;
+      active: boolean;
+      sharePercent: number;
+    }>();
+
+    const staffNameMap = new Map<string, string>();
+
+    staff.forEach(s => {
+      staffMap.set(s.id, {
+        id: s.id,
+        name: s.name,
+        role: s.role || (s as any).designation || 'Stylist',
+        phone: s.phone || '',
+        servicesCount: 0,
+        totalRevenue: 0,
+        totalCommission: 0,
+        appointmentsCount: 0,
+        avgTicket: 0,
+        active: s.isActive !== false,
+        sharePercent: 0
+      });
+      if (s.name) {
+        staffNameMap.set(s.name.toLowerCase().trim(), s.id);
+      }
+    });
+
+    let totalStaffServiceRevenue = 0;
+
+    filteredBills.forEach(bill => {
+      bill.items?.forEach(item => {
+        let sid = item.staffId || bill.staffId;
+        if (sid && !staffMap.has(sid)) {
+          const byName = staffNameMap.get(String(sid).toLowerCase().trim());
+          if (byName) sid = byName;
+        }
+
+        if (sid && staffMap.has(sid)) {
+          const sObj = staffMap.get(sid)!;
+          const isService = checkIsService(item);
+          const q = Number(item.quantity ?? item.qty ?? 1);
+          const price = Number(item.price || item.unitPrice || 0);
+          const disc = Number(item.discountAmount || 0);
+          const itemNet = Number(item.netAmount || (price * q - disc));
+
+          if (isService) {
+            sObj.servicesCount += q;
+          }
+          sObj.totalRevenue += itemNet;
+          sObj.totalCommission += Number(item.staffCommissionAmount || 0);
+          totalStaffServiceRevenue += itemNet;
+        }
+      });
+
+      let bSid = bill.staffId;
+      if (bSid && !staffMap.has(bSid)) {
+        const byName = staffNameMap.get(String(bSid).toLowerCase().trim());
+        if (byName) bSid = byName;
+      }
+      if (bSid && staffMap.has(bSid) && bill.staffCommissionAmount) {
+        const itemsCommSum = bill.items?.reduce((s, it) => s + (Number(it.staffCommissionAmount) || 0), 0) || 0;
+        if (itemsCommSum === 0 && Number(bill.staffCommissionAmount) > 0) {
+          staffMap.get(bSid)!.totalCommission += Number(bill.staffCommissionAmount);
+        }
+      }
+    });
+
+    dateFilteredAppointments.forEach(appt => {
+      if (appt.staffId && staffMap.has(appt.staffId)) {
+        staffMap.get(appt.staffId)!.appointmentsCount++;
+      }
+    });
+
+    const list = Array.from(staffMap.values()).map(s => {
+      const avg = s.servicesCount > 0 ? s.totalRevenue / s.servicesCount : 0;
+      const share = totalStaffServiceRevenue > 0 ? (s.totalRevenue / totalStaffServiceRevenue) * 100 : 0;
+      return {
+        ...s,
+        avgTicket: avg,
+        sharePercent: share
+      };
+    });
+
+    return list.sort((a, b) => b.totalRevenue - a.totalRevenue || b.servicesCount - a.servicesCount);
+  }, [staff, filteredBills, dateFilteredAppointments]);
 
   const topPerformingByRevenue = useMemo(() => {
     return [...topSellingProducts].sort((a, b) => b.revenue - a.revenue);
@@ -587,10 +916,21 @@ const DashboardOverview = () => {
       stock: p.stock
     }));
 
-    return { reportKpis, topProducts };
+    // Top 5 Staff with performance data
+    const topStaff = staffPerformance.slice(0, 5).map((s, i) => ({
+      rank: i + 1,
+      name: s.name,
+      role: s.role,
+      servicesCount: s.servicesCount,
+      revenue: `₹${s.totalRevenue.toLocaleString()}`,
+      commission: `₹${s.totalCommission.toLocaleString()}`,
+      appointments: s.appointmentsCount
+    }));
+
+    return { reportKpis, topProducts, topStaff };
   };
 
-  const { reportKpis, topProducts } = getReportData();
+  const { reportKpis, topProducts, topStaff } = getReportData();
 
   if (loading && totalRevenue === 0) {
     return (
@@ -639,14 +979,14 @@ const DashboardOverview = () => {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
         {/* Total Revenue */}
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between min-h-[100px]">
           <div className="flex justify-between items-start">
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Revenue</p>
             <DollarSign size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">₹{totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">₹{totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
         </div>
 
         {/* Total Profit */}
@@ -655,7 +995,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Profit</p>
             <TrendingUp size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">₹{totalProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">₹{totalProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
         </div>
 
         {/* Total Expense */}
@@ -664,7 +1004,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Expense</p>
             <TrendingDown size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">₹{totalExpenseAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">₹{totalExpenseAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
         </div>
 
         {/* Mode of Transactions */}
@@ -673,12 +1013,12 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Transactions</p>
             <ShoppingCart size={16} className="text-slate-400" />
           </div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-            <div className="flex items-center justify-between text-xs text-slate-600"><span>UPI</span> <span className="font-semibold text-slate-900">{txStats.upi}</span></div>
-            <div className="flex items-center justify-between text-xs text-slate-600"><span>Cash</span> <span className="font-semibold text-slate-900">{txStats.cash}</span></div>
-            <div className="flex items-center justify-between text-xs text-slate-600"><span>Card</span> <span className="font-semibold text-slate-900">{txStats.card}</span></div>
-            <div className="flex items-center justify-between text-xs text-slate-600"><span>Split</span> <span className="font-semibold text-slate-900">{txStats.split}</span></div>
-            <div className="flex items-center justify-between text-xs text-slate-600"><span>Partial</span> <span className="font-semibold text-slate-900">{txStats.partial}</span></div>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-1">
+            <div className="flex items-center justify-between text-[10px] text-slate-600"><span>UPI</span> <span className="font-semibold text-slate-900">{txStats.upi}</span></div>
+            <div className="flex items-center justify-between text-[10px] text-slate-600"><span>Cash</span> <span className="font-semibold text-slate-900">{txStats.cash}</span></div>
+            <div className="flex items-center justify-between text-[10px] text-slate-600"><span>Card</span> <span className="font-semibold text-slate-900">{txStats.card}</span></div>
+            <div className="flex items-center justify-between text-[10px] text-slate-600"><span>Split</span> <span className="font-semibold text-slate-900">{txStats.split}</span></div>
+            <div className="flex items-center justify-between text-[10px] text-slate-600 col-span-2"><span>Partial</span> <span className="font-semibold text-slate-900">{txStats.partial}</span></div>
           </div>
         </div>
 
@@ -691,7 +1031,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Low Stock</p>
             <AlertTriangle size={16} className={lowStockProducts.length > 0 ? 'text-amber-500' : 'text-slate-400'} />
           </div>
-          <h3 className={`text-2xl font-semibold tracking-tighter ${lowStockProducts.length > 0 ? 'text-amber-600' : 'text-slate-900'}`}>
+          <h3 className={`text-xl sm:text-2xl font-semibold tracking-tighter truncate ${lowStockProducts.length > 0 ? 'text-amber-600' : 'text-slate-900'}`}>
             {lowStockProducts.length}
           </h3>
         </div>
@@ -702,7 +1042,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Appointments</p>
             <Calendar size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">{totalAppointmentsCount}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">{totalAppointmentsCount}</h3>
         </div>
 
         {/* Service Revenue */}
@@ -711,7 +1051,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Services</p>
             <TrendingUp size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">₹{serviceRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">₹{serviceRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
         </div>
 
         {/* Product Revenue */}
@@ -720,7 +1060,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Products</p>
             <Package size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">₹{productRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">₹{productRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
         </div>
 
         {/* Total Commission */}
@@ -729,7 +1069,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Commission</p>
             <Users size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">₹{totalCommission.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">₹{totalCommission.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
         </div>
 
         {/* Customers Count */}
@@ -738,7 +1078,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Customers</p>
             <Users size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">{customers.length}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">{customers.length}</h3>
         </div>
 
         {/* Staff Count */}
@@ -747,7 +1087,7 @@ const DashboardOverview = () => {
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Active Staff</p>
             <Users size={16} className="text-slate-400" />
           </div>
-          <h3 className="text-2xl font-semibold tracking-tighter text-slate-900">{staff.filter(s => s.isActive).length}</h3>
+          <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">{staff.filter(s => s.isActive).length}</h3>
         </div>
       </div>
 
@@ -764,9 +1104,9 @@ const DashboardOverview = () => {
             <button
               key={view}
               onClick={() => setDashboardView(view)}
-              className={`px-4 py-1.5 text-[11px] font-semibold rounded transition-all tracking-wider uppercase ${dashboardView === view ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`px-4 py-1.5 text-[11px] font-semibold rounded transition-all tracking-wider uppercase ${dashboardView === view ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
-              {view.toUpperCase()}
+              {view === 'day' ? 'DAILY' : view === 'week' ? 'WEEKLY' : view === 'month' ? 'MONTHLY' : 'YEARLY'}
             </button>
           ))}
         </div>
@@ -775,8 +1115,21 @@ const DashboardOverview = () => {
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="bg-white p-6 rounded-xl border border-slate-200 lg:col-span-2">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 tracking-tight">Earnings vs Expenses</h3>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight">Earnings vs Expenses</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Real-time revenue, product costs, staff commissions & salon expenses</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                Earnings: ₹{chartDataFetched.reduce((sum, d) => sum + (Number(d.income) || 0), 0).toLocaleString('en-IN')}
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold border border-rose-100 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                Expenses: ₹{chartDataFetched.reduce((sum, d) => sum + (Number(d.expense) || 0), 0).toLocaleString('en-IN')}
+              </span>
+            </div>
           </div>
           <div className="h-[300px]">
             {chartDataFetched.length === 0 ? (
@@ -788,11 +1141,21 @@ const DashboardOverview = () => {
                 <BarChart data={chartDataFetched} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₹${v / 1000}k`} dx={-10} />
-                  <RechartsTooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: '#64748b', fontSize: 11 }}
+                    tickFormatter={(v) => v >= 1000 ? `₹${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k` : `₹${v}`}
+                    dx={-10}
+                  />
+                  <RechartsTooltip
+                    cursor={{ fill: '#f8fafc' }}
+                    contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    formatter={(value: any, name: string) => [`₹${Number(value || 0).toLocaleString('en-IN')}`, name]}
+                  />
                   <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
-                  <Bar dataKey="income" name="Earnings" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                  <Bar dataKey="expense" name="Expenses" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  <Bar dataKey="income" name="Earnings" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={36} minPointSize={4} />
+                  <Bar dataKey="expense" name="Expenses" fill="#f43f5e" radius={[4, 4, 0, 0]} maxBarSize={36} minPointSize={4} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -820,101 +1183,291 @@ const DashboardOverview = () => {
         </div>
       </div>
 
-      {/* Analytics Row */}
-      <div className="grid grid-cols-1 gap-6">
-
-        {/* Top 5 Performing Products Table */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200 overflow-hidden">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
-              Top 5 Performing Products
-            </h3>
-            <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded uppercase tracking-wider">
-              By Quantity Sold
-            </span>
+      {/* BEST STAFF PERFORMANCE */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <Users size={18} />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 tracking-tight">Best Staff Performance</h3>
           </div>
 
-          <div className="overflow-x-auto max-h-[400px] custom-scrollbar">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-initial">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search staff name..."
+                value={staffSearchTerm}
+                onChange={(e) => setStaffSearchTerm(e.target.value)}
+                className="pl-9 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 w-full sm:w-48 font-medium"
+              />
+            </div>
+            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">
+              {staff.filter(s => s.isActive !== false).length} Active Staff
+            </span>
+          </div>
+        </div>
+
+        {/* Staff Table */}
+        <div className="overflow-x-auto max-h-[380px] custom-scrollbar border border-slate-200 rounded-xl">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 bg-slate-50 z-10">
+              <tr className="text-[11px] text-slate-500 uppercase tracking-widest border-b border-slate-200">
+                <th className="p-3.5 font-semibold text-center w-16">Rank</th>
+                <th className="p-3.5 font-semibold">Staff Member</th>
+                <th className="p-3.5 font-semibold">Role / Designation</th>
+                <th className="p-3.5 font-semibold text-center">Services Done</th>
+                <th className="p-3.5 font-semibold text-center">Appts</th>
+                <th className="p-3.5 font-semibold text-right">Revenue Generated</th>
+                <th className="p-3.5 font-semibold text-right">Avg / Service</th>
+                <th className="p-3.5 font-semibold text-right">Commission</th>
+                <th className="p-3.5 font-semibold text-center">Contribution</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-xs font-medium">
+              {staffPerformance
+                .filter(s => !staffSearchTerm || s.name.toLowerCase().includes(staffSearchTerm.toLowerCase()) || s.role.toLowerCase().includes(staffSearchTerm.toLowerCase()))
+                .map((s, idx) => {
+                  return (
+                    <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-3 text-center">
+                        <span className={`inline-flex items-center justify-center font-bold px-2 py-0.5 rounded text-[11px] border ${
+                          idx === 0 ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                          idx === 1 ? 'bg-slate-100 text-slate-700 border-slate-300' :
+                          idx === 2 ? 'bg-orange-50 text-orange-800 border-orange-200' :
+                          'bg-slate-50 text-slate-500 border-slate-200'
+                        }`}>
+                          #{idx + 1}
+                        </span>
+                      </td>
+                      <td className="p-3 font-bold text-slate-900">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
+                            {s.name.slice(0, 1).toUpperCase()}
+                          </div>
+                          <span className="truncate">{s.name}</span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-slate-600 font-medium">{s.role}</td>
+                      <td className="p-3 text-center">
+                        <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-100">
+                          {s.servicesCount}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center text-slate-600 font-medium">{s.appointmentsCount}</td>
+                      <td className="p-3 text-right font-bold text-slate-900">
+                        ₹{s.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="p-3 text-right text-slate-600">
+                        ₹{s.avgTicket.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="p-3 text-right font-bold text-slate-700">
+                        ₹{s.totalCommission.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="p-3 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(100, s.sharePercent)}%` }} />
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-500 w-8 text-right">{s.sharePercent.toFixed(0)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              {staffPerformance.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="p-8 text-center text-slate-400 font-medium">No staff performance data available for this date range</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* BEST SELLING PRODUCTS */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <Package size={18} />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 tracking-tight">Best Selling Products</h3>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            {/* View Switcher: Products vs Services */}
+            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+              <button
+                onClick={() => setAnalyticsTab('products')}
+                className={`px-3 py-1 rounded transition-all ${analyticsTab === 'products' ? 'bg-white text-blue-700 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                Products ({retailProductPerformance.length})
+              </button>
+              <button
+                onClick={() => setAnalyticsTab('services')}
+                className={`px-3 py-1 rounded transition-all ${analyticsTab === 'services' ? 'bg-white text-blue-700 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                Services ({servicePerformance.length})
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative flex-1 sm:flex-initial">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder={analyticsTab === 'products' ? "Search products..." : "Search services..."}
+                value={productSearchTerm}
+                onChange={(e) => setProductSearchTerm(e.target.value)}
+                className="pl-9 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 w-full sm:w-44 font-medium"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Products / Services Table */}
+        {analyticsTab === 'products' ? (
+          <div className="overflow-x-auto max-h-[420px] custom-scrollbar border border-slate-200 rounded-xl">
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 bg-slate-50 z-10">
                 <tr className="text-[11px] text-slate-500 uppercase tracking-widest border-b border-slate-200">
-                  <th className="p-4 font-semibold text-center">Rank</th>
-                  <th className="p-4 font-semibold whitespace-nowrap">Date</th>
-                  <th className="p-4 font-semibold">Product ID</th>
-                  <th className="p-4 font-semibold">Product Name</th>
-                  <th className="p-4 font-semibold">Category</th>
-                  <th className="p-4 font-semibold whitespace-nowrap">Purchase Price</th>
-                  <th className="p-4 font-semibold whitespace-nowrap">Selling Price</th>
-                  <th className="p-4 font-semibold text-center">Qty Sold</th>
-                  <th className="p-4 font-semibold text-center">Stock</th>
+                  <th className="p-3.5 font-semibold text-center w-16">Rank</th>
+                  <th className="p-3.5 font-semibold">Product Name</th>
+                  <th className="p-3.5 font-semibold">Category</th>
+                  <th className="p-3.5 font-semibold text-right">Selling Price</th>
+                  <th className="p-3.5 font-semibold text-right">Buying Price</th>
+                  <th className="p-3.5 font-semibold text-right">Margin (%)</th>
+                  <th className="p-3.5 font-semibold text-center">Units Sold</th>
+                  <th className="p-3.5 font-semibold text-right">Revenue</th>
+                  <th className="p-3.5 font-semibold text-center">Stock</th>
+                  <th className="p-3.5 font-semibold text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {topSellingProducts.slice(0, 5).map((p, i) => {
-                  let badge = "";
-                  if (i === 0) badge = "🥇 #1";
-                  else if (i === 1) badge = "🥈 #2";
-                  else if (i === 2) badge = "🥉 #3";
-                  else badge = `#${i + 1}`;
-
-                  let badgeClasses = "inline-flex items-center justify-center font-black px-2.5 py-1 rounded-full shadow-sm text-xs whitespace-nowrap border ";
-                  if (i === 0) badgeClasses += "bg-yellow-100 text-yellow-800 border-yellow-300";
-                  else if (i === 1) badgeClasses += "bg-slate-200 text-slate-800 border-slate-300";
-                  else if (i === 2) badgeClasses += "bg-amber-100 text-amber-800 border-amber-300";
-                  else badgeClasses += "bg-slate-50 text-slate-500 border-slate-200";
-
-                  const isTop3 = i < 3;
-
-                  return (
-                    <tr key={i} className={`group transition-colors ${isTop3 ? 'bg-amber-50/20 hover:bg-amber-50/60' : 'hover:bg-slate-50/50'}`}>
-                      <td className="p-3 text-center">
-                        <span className={badgeClasses} title={`Rank ${i + 1} Top Seller`}>{badge}</span>
-                      </td>
-                      <td className="p-3 text-[11px] font-bold text-slate-500 whitespace-nowrap">
-                        {(() => {
-                          try {
-                            return p.purchaseDate && !isNaN(new Date(p.purchaseDate).getTime())
-                              ? format(new Date(p.purchaseDate), 'dd MMM yyyy')
-                              : 'N/A';
-                          } catch (e) { return 'N/A'; }
-                        })()}
-                      </td>
-                      <td className="p-3 text-[11px] font-mono font-bold text-slate-400 uppercase tracking-tight">
-                        {p.id || 'N/A'}
-                      </td>
-                      <td className="p-3 min-w-[140px]">
-                        <p className="font-black text-slate-800 text-sm leading-tight group-hover:text-amber-700 transition-colors">{p.name}</p>
-                      </td>
-                      <td className="p-3 text-xs font-bold text-slate-600 uppercase tracking-wider">
-                        {p.category || 'N/A'}
-                      </td>
-                      <td className="p-3 text-xs font-bold text-slate-600 whitespace-nowrap">
-                        ₹{p.purchaseRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-xs font-bold text-slate-600 whitespace-nowrap">
-                        ₹{p.sellingPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100/50 block mx-auto w-fit">
-                          {p.qtySold}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className={`text-xs font-black px-2 py-1 rounded-md flex items-center justify-center gap-1 mx-auto w-fit ${p.stock <= 5 ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
-                          {p.stock <= 5 && <AlertTriangle size={12} className="text-red-500" />} {p.stock}
-                        </span>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {topSellingProducts.length === 0 && (
-                  <tr><td colSpan={10} className="p-6 text-center text-slate-400 font-medium">No sales data available</td></tr>
+              <tbody className="divide-y divide-slate-100 text-xs font-medium">
+                {retailProductPerformance
+                  .filter(p => !productSearchTerm || p.name.toLowerCase().includes(productSearchTerm.toLowerCase()) || p.category.toLowerCase().includes(productSearchTerm.toLowerCase()))
+                  .map((p, i) => {
+                    return (
+                      <tr key={p.id || i} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 text-center">
+                          <span className={`inline-flex items-center justify-center font-bold px-2 py-0.5 rounded text-[11px] border ${
+                            i === 0 ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                            i === 1 ? 'bg-slate-100 text-slate-700 border-slate-300' :
+                            i === 2 ? 'bg-orange-50 text-orange-800 border-orange-200' :
+                            'bg-slate-50 text-slate-500 border-slate-200'
+                          }`}>
+                            #{i + 1}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
+                          <p className="text-[10px] text-slate-400 font-mono mt-0.5">{p.id || p.barcode}</p>
+                        </td>
+                        <td className="p-3">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                            {p.category}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-semibold text-slate-900">
+                          ₹{p.sellingPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right text-slate-500">
+                          ₹{p.purchaseRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3 text-right">
+                          <span className={`font-bold ${p.margin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {p.margin.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
+                            {p.qtySold}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-900">
+                          ₹{p.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded inline-flex items-center gap-1 ${
+                            p.stock <= 5 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-50 text-slate-700 border border-slate-200'
+                          }`}>
+                            {p.stock <= 5 && <AlertTriangle size={11} className="text-red-500" />}
+                            {p.stock}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            onClick={() => setSelectedProductDetails(p)}
+                            className="text-xs text-blue-600 hover:text-blue-800 font-medium px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 transition-colors inline-flex items-center gap-1"
+                            title="View Customers"
+                          >
+                            <Users size={12} /> Insights
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                {retailProductPerformance.length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center text-slate-400 font-medium">No product sales recorded for this date range</td>
+                  </tr>
                 )}
               </tbody>
             </table>
           </div>
-        </div>
-
+        ) : (
+          <div className="overflow-x-auto max-h-[420px] custom-scrollbar border border-slate-200 rounded-xl">
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 bg-slate-50 z-10">
+                <tr className="text-[11px] text-slate-500 uppercase tracking-widest border-b border-slate-200">
+                  <th className="p-3.5 font-semibold text-center w-16">Rank</th>
+                  <th className="p-3.5 font-semibold">Service Name</th>
+                  <th className="p-3.5 font-semibold">Category</th>
+                  <th className="p-3.5 font-semibold text-right">Avg Price</th>
+                  <th className="p-3.5 font-semibold text-center">Times Rendered</th>
+                  <th className="p-3.5 font-semibold text-right">Total Service Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs font-medium">
+                {servicePerformance
+                  .filter(s => !productSearchTerm || s.name.toLowerCase().includes(productSearchTerm.toLowerCase()))
+                  .map((s, i) => (
+                    <tr key={s.id || i} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-3 text-center">
+                        <span className={`inline-flex items-center justify-center font-bold px-2 py-0.5 rounded text-[11px] border ${
+                          i === 0 ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                          i === 1 ? 'bg-slate-100 text-slate-700 border-slate-300' :
+                          i === 2 ? 'bg-orange-50 text-orange-800 border-orange-200' :
+                          'bg-slate-50 text-slate-500 border-slate-200'
+                        }`}>
+                          #{i + 1}
+                        </span>
+                      </td>
+                      <td className="p-3 font-bold text-slate-900">{s.name}</td>
+                      <td className="p-3 text-slate-500">{s.category}</td>
+                      <td className="p-3 text-right font-semibold text-slate-700">₹{s.avgPrice.toFixed(0)}</td>
+                      <td className="p-3 text-center">
+                        <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-100">
+                          {s.timesPerformed}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right font-bold text-slate-900">
+                        ₹{s.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </td>
+                    </tr>
+                  ))}
+                {servicePerformance.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">No salon service sales recorded for this date range</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* View Product Modal */}
@@ -1019,288 +1572,6 @@ const DashboardOverview = () => {
         </div>
       )}
 
-      {/* Pricing Insights */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200">
-        <h3 className="text-lg font-semibold text-slate-900 tracking-tight mb-6">Best Selling Products (Pricing)</h3>
-        <div className="h-[360px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={topSellingProducts} layout="horizontal" margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-              <defs>
-                <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#64748b" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.8} />
-                </linearGradient>
-                <linearGradient id="colorSold" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.9} />
-                  <stop offset="95%" stopColor="#34d399" stopOpacity={0.9} />
-                </linearGradient>
-                <linearGradient id="colorRemain" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f97316" stopOpacity={0.9} />
-                  <stop offset="95%" stopColor="#fb923c" stopOpacity={0.9} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="chartLabel" axisLine={false} tickLine={false} tick={{ fill: '#475569', fontSize: 13, fontWeight: 600 }} dy={15} width={80} interval={0} angle={-15} textAnchor="end" />
-              <YAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dx={-5} />
-              <RechartsTooltip
-                cursor={{ fill: '#f8fafc' }}
-                content={({ active, payload, label }) => {
-                  if (active && payload && payload.length) {
-                    const data = payload[0].payload;
-                    return (
-                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xl min-w-[240px]">
-                        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2 flex items-center justify-between">
-                          <span className="line-clamp-1 text-sm">{data.chartLabel}</span>
-                          <span className="text-[9px] font-mono text-slate-400 ml-2">#{data.hashtagNumber || data.id?.slice(-6) || 'N/A'}</span>
-                        </p>
-                        <div className="space-y-2 text-xs">
-                          <div className="pt-2">
-                            <p className="text-[10px] uppercase font-black text-slate-400 mb-2 tracking-wider">Inventory Insight</p>
-                            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 flex flex-col justify-center">
-                                <div className="text-slate-400 font-bold uppercase mb-0.5 text-[9px]">Total Qty</div>
-                                <div className="font-black text-slate-700">{data.totalQty}</div>
-                              </div>
-                              <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-100 flex flex-col justify-center">
-                                <div className="text-emerald-600 font-bold uppercase mb-0.5 text-[9px]">Qty Sold</div>
-                                <div className="font-black text-emerald-700">{data.qtySold}</div>
-                              </div>
-                              <div className={`p-2 rounded-lg border flex flex-col justify-center ${data.stock <= 5 ? 'bg-rose-50 border-rose-100' : 'bg-orange-50 border-orange-100'}`}>
-                                <div className={`${data.stock <= 5 ? 'text-rose-500' : 'text-orange-600'} font-bold uppercase mb-0.5 text-[9px]`}>Remaining</div>
-                                <div className={`font-black ${data.stock <= 5 ? 'text-rose-600' : 'text-orange-700'}`}>{data.stock}</div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                }}
-              />
-              <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px', fontSize: '13px', fontWeight: 600 }} />
-
-              {/* Thin, rounded bars with spacing */}
-              <Bar
-                dataKey="totalQty"
-                name="Total Quantity"
-                fill="url(#colorTotal)"
-                radius={[4, 4, 0, 0]}
-                barSize={16}
-              />
-              <Bar
-                dataKey="qtySold"
-                name="Quantity Sold"
-                fill="url(#colorSold)"
-                radius={[4, 4, 0, 0]}
-                barSize={16}
-              />
-              <Bar
-                dataKey="stock"
-                name="Remaining Stock"
-                fill="url(#colorRemain)"
-                radius={[4, 4, 0, 0]}
-                barSize={16}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Pricing Insights & Margins Row */}
-      <div className="pb-6">
-        <div className="bg-white p-6 rounded-xl border border-slate-200 font-sans">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
-              Pricing Insights & Margins
-            </h3>
-            <div className="relative w-full sm:w-auto">
-              <input
-                type="text"
-                placeholder="Search product..."
-                value={bottomTableSearch}
-                onChange={(e) => setBottomTableSearch(e.target.value)}
-                className="pl-3 pr-8 py-2 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-slate-400 outline-none w-full sm:w-48 font-medium"
-              />
-              <Package size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            </div>
-          </div>
-          <div className="max-h-[500px] overflow-auto custom-scrollbar border border-slate-200 rounded-lg">
-            <table className="w-full text-left border-collapse">
-              <thead className="sticky top-0 bg-slate-50 z-10">
-                <tr className="text-slate-500 text-[11px] uppercase font-semibold tracking-widest border-b border-slate-200">
-                  <th className="p-4 text-center">Rank</th>
-                  <th className="p-4 whitespace-nowrap">Date</th>
-                  <th className="p-4">Product ID</th>
-                  <th className="p-4">Product Name</th>
-                  <th className="p-4">Category</th>
-                  <th className="p-4 whitespace-nowrap">Buying Price (₹)</th>
-                  <th className="p-4 whitespace-nowrap">Selling Price (₹)</th>
-                  <th className="p-4 whitespace-nowrap">Margin (₹)</th>
-                  <th className="p-4">Margin (%)</th>
-                  <th className="p-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredProducts.filter(p => {
-                  if (!bottomTableSearch) return true;
-                  const search = bottomTableSearch.toLowerCase();
-                  return p.name.toLowerCase().includes(search);
-                }).map(p => {
-                  const isEditing = editingProductId === p.id;
-                  const buy = isEditing ? editValues.purchaseRate : (p.purchaseRate || 0);
-                  const sell = isEditing ? editValues.sellingPrice : (p.sellingPrice || 0);
-                  const marginAmt = sell - buy;
-                  const marginPct = buy > 0 ? (marginAmt / buy) * 100 : 0;
-                  const isProfitable = marginAmt >= 0;
-
-                  const topRankIndex = topSellingProducts.findIndex(tp => tp.id === p.id);
-                  const isTop5 = topRankIndex !== -1 && topRankIndex < 5;
-
-                  return (
-                    <tr
-                      key={p.id}
-                      className={`transition-colors group cursor-pointer ${isEditing ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}
-                      onClick={() => {
-                        if (!isEditing && p.id) {
-                          handleEditClick(p);
-                        }
-                      }}
-                    >
-                      <td className="p-4 text-center">
-                        {isTop5 ? (
-                          <span className={`inline-flex items-center justify-center font-black px-2.5 py-1 rounded-full shadow-sm text-[10px] whitespace-nowrap border ${topRankIndex === 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-300' :
-                              topRankIndex === 1 ? 'bg-slate-200 text-slate-800 border-slate-300' :
-                                topRankIndex === 2 ? 'bg-amber-100 text-amber-800 border-amber-300' :
-                                  'bg-blue-50 text-blue-600 border-blue-200'
-                            }`}>
-                            {topRankIndex === 0 ? '🥇 #1' : topRankIndex === 1 ? '🥈 #2' : topRankIndex === 2 ? '🥉 #3' : `#${topRankIndex + 1}`}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-bold text-slate-400">#{topRankIndex + 1 > 0 ? topRankIndex + 1 : '-'}</span>
-                        )}
-                      </td>
-                      <td className="p-4 text-[11px] font-bold text-slate-500 whitespace-nowrap">
-                        {(() => {
-                          try {
-                            const dateVal = p.purchaseDate || p.createdAt;
-                            return dateVal && !isNaN(new Date(dateVal).getTime())
-                              ? format(new Date(dateVal), 'dd MMM yyyy')
-                              : 'N/A';
-                          } catch (e) { return 'N/A'; }
-                        })()}
-                      </td>
-                      <td className="p-4 text-[11px] font-mono font-bold text-slate-400 uppercase tracking-tight">
-                        {p.id || 'N/A'}
-                      </td>
-                      <td className="p-4 font-medium text-slate-800">
-                        <div className="flex flex-col items-start gap-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-black text-slate-800">{p.name}</span>
-                            {isEditing && <span className="px-1.5 py-0.5 text-[9px] uppercase font-black text-blue-600 bg-blue-100 rounded-md animate-pulse">EDITING</span>}
-                          </div>
-                          {isTop5 && (
-                            <span className="text-[9px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md inline-flex items-center gap-1 shadow-sm">
-                              ⭐ TOP SELLER
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                        {p.category || 'N/A'}
-                      </td>
-                      <td className="p-4" onClick={(e) => isEditing && e.stopPropagation()}>
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            autoFocus
-                            className="w-24 px-2 py-1 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold"
-                            value={editValues.purchaseRate === 0 ? '' : editValues.purchaseRate}
-                            onChange={e => setEditValues(prev => ({ ...prev, purchaseRate: parseFloat(e.target.value) || 0 }))}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' && p.id) {
-                                e.preventDefault();
-                                handleSaveEdit(p.id);
-                              } else if (e.key === 'Escape') {
-                                handleCancelEdit();
-                              }
-                            }}
-                          />
-                        ) : (
-                          <span className="text-xs font-bold text-slate-600">₹{buy.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                        )}
-                      </td>
-                      <td className="p-4" onClick={(e) => isEditing && e.stopPropagation()}>
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            className="w-24 px-2 py-1 border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold"
-                            value={editValues.sellingPrice === 0 ? '' : editValues.sellingPrice}
-                            onChange={e => setEditValues(prev => ({ ...prev, sellingPrice: parseFloat(e.target.value) || 0 }))}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' && p.id) {
-                                e.preventDefault();
-                                handleSaveEdit(p.id);
-                              } else if (e.key === 'Escape') {
-                                handleCancelEdit();
-                              }
-                            }}
-                          />
-                        ) : (
-                          <span className="text-xs font-bold text-slate-600">₹{sell.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                        )}
-                      </td>
-                      <td className="p-4 font-bold">
-                        <span className={`text-xs ${isProfitable ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {isProfitable ? '+' : ''}₹{marginAmt.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-black ${isProfitable ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                          {isProfitable ? '+' : ''}{(marginPct || 0).toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        {isEditing ? (
-                          <div className="flex justify-end gap-1">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); if (p.id) handleSaveEdit(p.id); }}
-                              className="p-1.5 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors"
-                              title="Save (Enter)"
-                            >
-                              <Check size={16} strokeWidth={3} />
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleCancelEdit(); }}
-                              className="p-1.5 text-rose-500 bg-rose-50 hover:bg-rose-100 rounded-md transition-colors"
-                              title="Cancel (Esc)"
-                            >
-                              <X size={16} strokeWidth={3} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md opacity-0 group-hover:opacity-100 transition-all"
-                            title="Edit Pricing"
-                            onClick={(e) => { e.stopPropagation(); if (p.id) handleEditClick(p); }}
-                          >
-                            <Pencil size={16} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {products.length === 0 && (
-                  <tr>
-                    <td colSpan={11} className="p-8 text-center text-slate-500">No product data available</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
       {/* Hidden Report Container */}
       <div id="report-container" style={{ display: 'none', width: '1000px', backgroundColor: 'white', color: 'black', padding: '40px', fontFamily: 'Inter, sans-serif' }}>
         {/* Header Section */}
@@ -1364,9 +1635,9 @@ const DashboardOverview = () => {
             Best Selling Products UI (Pricing)
           </h2>
           <div style={{ border: '1px solid #f1f5f9', borderRadius: '12px', padding: '20px', backgroundColor: '#fff' }}>
-            <BarChart width={900} height={350} data={topSellingProducts.slice(0, 8)} margin={{ top: 10, right: 10, left: 10, bottom: 60 }}>
+            <BarChart width={900} height={350} data={topSellingProducts.slice(0, 8)} margin={{ top: 10, right: 10, left: 10, bottom: 80 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="chartLabel" interval={0} angle={-20} textAnchor="end" tick={{fontSize: 10, fontWeight: 600}} dy={15} />
+              <XAxis dataKey="chartLabel" interval={0} angle={-25} textAnchor="end" tick={{fontSize: 10, fontWeight: 600}} tickFormatter={(val) => val.length > 20 ? val.substring(0, 20) + '...' : val} dy={15} />
               <YAxis tick={{fontSize: 10}} />
               <Bar dataKey="totalQty" name="Total Quantity" fill="#94a3b8" radius={[4, 4, 0, 0]} />
               <Bar dataKey="qtySold" name="Quantity Sold" fill="#10b981" radius={[4, 4, 0, 0]} />
@@ -1407,6 +1678,44 @@ const DashboardOverview = () => {
                   <td style={{ padding: '10px', color: p.stock <= 5 ? '#ef4444' : '#64748b' }}>{p.stock}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Top Performing Salon Staff */}
+        <div style={{ marginBottom: '40px', breakBefore: 'page' }}>
+          <h2 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '20px', borderLeft: '4px solid #6366f1', paddingLeft: '15px', color: '#1e293b' }}>
+            Top Performing Salon Staff
+          </h2>
+          <table style={{ width: '100%', borderCollapse: 'collapse', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+            <thead style={{ backgroundColor: '#f8fafc', textAlign: 'left', fontSize: '10px', textTransform: 'uppercase' }}>
+              <tr>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Rank</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Staff Name</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Role / Designation</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Services Rendered</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Appointments</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Revenue Generated</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0' }}>Commission Earned</th>
+              </tr>
+            </thead>
+            <tbody style={{ fontSize: '10px' }}>
+              {topStaff.map((s, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '10px', fontWeight: 'bold' }}>#{s.rank}</td>
+                  <td style={{ padding: '10px', fontWeight: 'bold', color: '#1e293b' }}>{s.name}</td>
+                  <td style={{ padding: '10px', color: '#64748b' }}>{s.role}</td>
+                  <td style={{ padding: '10px', fontWeight: 'bold', color: '#3b82f6' }}>{s.servicesCount}</td>
+                  <td style={{ padding: '10px', color: '#64748b' }}>{s.appointments}</td>
+                  <td style={{ padding: '10px', fontWeight: 'bold', color: '#059669' }}>{s.revenue}</td>
+                  <td style={{ padding: '10px', fontWeight: 'bold', color: '#d97706' }}>{s.commission}</td>
+                </tr>
+              ))}
+              {topStaff.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ padding: '20px', textAlign: 'center', color: '#94a3b8' }}>No staff performance data available</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

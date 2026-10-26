@@ -28,7 +28,7 @@ const StatusBadge = ({ label, onClick, disabled }: { label: string; onClick?: ()
 
     return (
         <button
-            onClick={(e) => { e.stopPropagation(); isClickable && onClick(); }}
+            onClick={(e) => { e.stopPropagation(); if (isClickable && onClick) onClick(); }}
             disabled={disabled || !isClickable}
             className={`text-[10px] px-2 py-0.5 rounded border font-black uppercase transition-all shadow-sm ${theme} ${isClickable ? 'cursor-pointer active:scale-95' : 'cursor-default'}`}
         >
@@ -44,7 +44,7 @@ const PaymentModal = ({ customerId, customerName, bill, onClose, onPaymentRecord
     const [isProcessing, setIsProcessing] = useState(false);
 
     const handlePaymentSubmit = async () => {
-        if (amount <= 0 || amount > (bill.balance || 0)) {
+        if (amount <= 0 || amount > (bill.balance || 0) + 0.01) {
             toast.error("Invalid payment amount");
             return;
         }
@@ -185,17 +185,45 @@ const HistoryModal = ({ bill, customerName, onClose }: { bill: CustomerPurchase;
                 </div>
 
                 <div className="flex-grow overflow-y-auto custom-scrollbar">
+                    <div className="p-4 border-b border-slate-100 bg-slate-50">
+                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Items Purchased</h3>
+                        <div className="space-y-2">
+                            {bill.items && bill.items.length > 0 ? bill.items.map((item: any, idx: number) => {
+                                const itemName = item.productName || item.name || item.serviceName || 'Unknown Item';
+                                const itemTotal = Number(item.netAmount || item.total || (Number(item.price || 0) * Number(item.qty || 1)) || 0);
+                                return (
+                                    <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 font-bold text-[10px]">
+                                                {item.qty || 1}x
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-slate-700 text-sm">{itemName}</p>
+                                            </div>
+                                        </div>
+                                        <p className="font-bold text-slate-700 font-mono">₹{itemTotal.toFixed(2)}</p>
+                                    </div>
+                                );
+                            }) : (
+                                <p className="text-slate-400 text-xs italic">No items recorded.</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="p-4 bg-slate-50">
+                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Payment Records</h3>
+                    </div>
                     {!bill.paymentHistory || bill.paymentHistory.length === 0 ? (
-                        <div className="p-12 text-center text-gray-400 text-sm">No payment records available.</div>
+                        <div className="p-8 text-center text-gray-400 text-sm bg-white">No payment records available.</div>
                     ) : (
-                        <table className="w-full text-sm border-collapse">
+                        <table className="w-full text-sm border-collapse bg-white">
                             <thead className="bg-gray-100 text-gray-600 uppercase text-xs sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-5 py-3 text-left">Date</th>
-                                    <th className="px-5 py-3 text-right">Paid Amount</th>
-                                    <th className="px-5 py-3 text-center">Mode</th>
-                                    <th className="px-5 py-3 text-right">Balance After</th>
-                                    <th className="px-5 py-3 text-left">Remarks</th>
+                                    <th className="px-5 py-3 text-left border-y border-slate-200">Date</th>
+                                    <th className="px-5 py-3 text-right border-y border-slate-200">Paid Amount</th>
+                                    <th className="px-5 py-3 text-center border-y border-slate-200">Mode</th>
+                                    <th className="px-5 py-3 text-right border-y border-slate-200">Balance After</th>
+                                    <th className="px-5 py-3 text-left border-y border-slate-200">Remarks</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -315,7 +343,7 @@ const Customers = () => {
                     if (cPhone.length > 5 && bPhone.length > 5 && cPhone === bPhone) return true;
                 }
                 if (selectedCustomer.name && b.customerName) {
-                    return b.customerName.trim().toLowerCase() === selectedCustomer.name.trim().toLowerCase();
+                    return b.customerName.toString().trim().toLowerCase() === selectedCustomer.name.toString().trim().toLowerCase();
                 }
                 return false;
             });
@@ -619,7 +647,7 @@ const Customers = () => {
             </div>
 
             {isModalOpen && <CustomerFormModal customer={editingCustomer} onSave={handleSaveCustomer} onClose={handleCloseModal} isSaving={isSaving} />}
-            {isPayModalOpen && billToPay && selectedCustomer && <PaymentModal customerId={selectedCustomer.id} customerName={selectedCustomer.name} bill={billToPay} onClose={() => setIsPayModalOpen(false)} onPaymentRecorded={() => { refreshBills(); fetchHistory(); }} />}
+            {isPayModalOpen && billToPay && selectedCustomer && <PaymentModal customerId={selectedCustomer.id} customerName={selectedCustomer.name} bill={billToPay} onClose={() => setIsPayModalOpen(false)} onPaymentRecorded={() => { refreshBills(); refreshCustomers(); fetchHistory(); }} />}
             {isHistoryModalOpen && selectedBill && <HistoryModal bill={selectedBill} customerName={selectedCustomer?.name || ''} onClose={() => setIsHistoryModalOpen(false)} />}
         </div>
     );

@@ -1,8 +1,163 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    // Helper: checks if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: checks if user is an Admin
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'admin@mail.com' ||
+        request.auth.token.role == 'ADMIN' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
+      );
+    }
+
+    // Helper: checks if user is a Cashier or Admin
+    function isCashier() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        request.auth.token.email == 'cashier@mail.com' ||
+        request.auth.token.role == 'CASHIER' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CASHIER')
+      );
+    }
+
+    // 1. User profiles & roles:
+    // Any authenticated user can read their own profile; only Admin can manage all users or change roles
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
+    }
+
+    // 2. Settings (global configuration, tax rates, bank details):
+    // Read by any staff; only Admin can modify
+    match /settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 3. Staff profiles & designations:
+    // Read by staff; only Admin can add/edit/remove staff profiles
+    match /staff/{staffId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 4. Staff commission records:
+    match /staff_commissions/{commId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isCashier();
+      allow delete: if isAdmin();
+    }
+
+    // 5. Products & Inventory:
+    // Read by staff; Admin can fully manage; Cashier can update stock during sales
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isCashier() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'currentStock', 'updatedAt']));
+    }
+
+    // 6. Services & Salon Services:
+    match /services/{serviceId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /salon_services/{serviceId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 7. Categories:
+    match /categories/{catId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /salon_service_categories/{catId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 8. Package Templates:
+    match /packages/{pkgId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 9. Customer Packages (sold to customers):
+    match /customer_packages/{cpId} {
+      allow read, write: if isCashier();
+    }
+
+    // 10. Stock Transactions Audit Ledger:
+    match /stock_transactions/{txId} {
+      allow read: if isAuthenticated();
+      allow create: if isCashier();
+      allow update, delete: if isAdmin();
+    }
+
+    // 11. Bills (Invoices):
+    // - Customers with link /bill/:id can view their receipt (get)
+    // - Authenticated staff can list bills
+    // - Cashiers can create bills and record payments
+    // - Only Admin can delete or cancel/refund bills
+    match /bills/{billId} {
+      allow get: if true;
+      allow list: if isAuthenticated();
+      allow create: if isCashier();
+      allow update: if isAdmin() || (isCashier() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'amountPaid', 'balance', 'pendingBalance', 'pendingAmount', 'status', 'paymentHistory', 'updatedAt', 'paymentMethod'
+      ]));
+      allow delete: if isAdmin();
+    }
+
+    // 12. Estimations / Quotations:
+    match /estimations/{estId} {
+      allow read, write: if isCashier();
+    }
+
+    // 13. Customers:
+    match /customers/{customerId} {
+      allow read, write: if isCashier();
+    }
+
+    // 14. Appointments:
+    match /appointments/{apptId} {
+      allow read, write: if isCashier();
+    }
+
+    // 15. Attendance:
+    match /attendance/{attId} {
+      allow read, write: if isCashier();
+    }
+
+    // 16. Daybook & Cash Tally:
+    match /daybook/{entryId} {
+      allow read, write: if isCashier();
+    }
+
+    match /cash_tally/{tallyId} {
+      allow read, write: if isCashier();
+    }
+
+    // 17. Vendors / Suppliers & Transactions:
+    match /vendors/{vendorId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /vendor_transactions/{txId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
   }
 }

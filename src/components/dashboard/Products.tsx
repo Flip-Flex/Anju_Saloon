@@ -849,74 +849,14 @@ const Products = () => {
   };
 
   const handleDownloadTemplate = (format: 'excel' | 'csv' = 'excel') => {
-    const templateData = [
-      {
-        "Supplier Name": "L'Oreal Professional India",
-        "Date": new Date().toISOString().split('T')[0],
-        "Product Name": "Mythic Oil Nourishing Serum 100ml",
-        "Product Type": "RETAIL",
-        "Purchase Price": 650.00,
-        "Selling Price": 950.00,
-        "Stock Quantity": 24,
-        "Unlimited Stock": "N",
-        "Category": "Hair Care",
-        "GST %": 18,
-        "Supplier Contact": "9876543210",
-        "Supplier Address": "Mumbai, Maharashtra",
-        "Supplier GST": "27AAAAA0000A1Z5",
-        "Supplier Nickname": "LOreal Direct",
-        "Product ID": "PROD-101"
-      },
-      {
-        "Supplier Name": "Schwarzkopf Professional",
-        "Date": new Date().toISOString().split('T')[0],
-        "Product Name": "BC Bonacure Peptide Repair Shampoo 250ml",
-        "Product Type": "RETAIL",
-        "Purchase Price": 480.00,
-        "Selling Price": 750.00,
-        "Stock Quantity": 15,
-        "Unlimited Stock": "N",
-        "Category": "Hair Care",
-        "GST %": 18,
-        "Supplier Contact": "9876543211",
-        "Supplier Address": "Bengaluru, Karnataka",
-        "Supplier GST": "29BBBBB0000B1Z6",
-        "Supplier Nickname": "Schwarzkopf",
-        "Product ID": "PROD-102"
-      }
-    ];
-
-    const ws = utils.json_to_sheet(templateData);
-
-    // Set auto column widths for Excel
-    ws['!cols'] = [
-      { wch: 28 }, // Supplier Name
-      { wch: 14 }, // Date
-      { wch: 42 }, // Product Name
-      { wch: 14 }, // Product Type
-      { wch: 15 }, // Purchase Price
-      { wch: 15 }, // Selling Price
-      { wch: 15 }, // Stock Quantity
-      { wch: 16 }, // Unlimited Stock
-      { wch: 18 }, // Category
-      { wch: 10 }, // GST %
-      { wch: 18 }, // Supplier Contact
-      { wch: 25 }, // Supplier Address
-      { wch: 18 }, // Supplier GST
-      { wch: 18 }, // Supplier Nickname
-      { wch: 14 }, // Product ID
-    ];
-
-    const wb = utils.book_new();
-    utils.book_append_sheet(wb, ws, "Product Template");
-
-    if (format === 'csv') {
-      writeFile(wb, "products_upload_template.csv", { bookType: "csv" });
-      toast.success("CSV Template downloaded successfully!");
-    } else {
-      writeFile(wb, "products_upload_template.xlsx");
-      toast.success("Excel Template downloaded successfully!");
-    }
+    const fileName = format === 'csv' ? 'products_upload_template.csv' : 'products_upload_template.xlsx';
+    const link = document.createElement('a');
+    link.href = `/${fileName}`;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(format === 'csv' ? 'CSV Template downloaded!' : 'Excel Template downloaded!');
   };
 
   const handleSaveMultipleProducts = async (productsToSave: any[]) => {
@@ -1146,25 +1086,33 @@ const Products = () => {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56 bg-white shadow-xl border border-gray-200 z-50 p-1 rounded-lg">
-                  <DropdownMenuItem
-                    onClick={() => handleDownloadTemplate('excel')}
-                    className="flex items-center gap-2.5 cursor-pointer py-2 px-2.5 rounded-md hover:bg-emerald-50 text-gray-800 transition-colors"
-                  >
-                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="font-semibold text-xs text-gray-900">Excel Template (.xlsx)</span>
-                      <span className="text-[10px] text-gray-500">Opens in Microsoft Excel / Sheets</span>
-                    </div>
+                  <DropdownMenuItem asChild>
+                    <a
+                      href="/products_upload_template.xlsx"
+                      download="products_upload_template.xlsx"
+                      className="flex items-center gap-2.5 cursor-pointer py-2 px-2.5 rounded-md hover:bg-emerald-50 text-gray-800 transition-colors w-full no-underline"
+                      onClick={() => toast.success("Excel Template downloaded!")}
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-gray-900">Excel Template (.xlsx)</span>
+                        <span className="text-[10px] text-gray-500">Opens directly in Microsoft Excel</span>
+                      </div>
+                    </a>
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => handleDownloadTemplate('csv')}
-                    className="flex items-center gap-2.5 cursor-pointer py-2 px-2.5 rounded-md hover:bg-blue-50 text-gray-800 transition-colors"
-                  >
-                    <Download className="w-4 h-4 text-blue-600 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="font-semibold text-xs text-gray-900">CSV Template (.csv)</span>
-                      <span className="text-[10px] text-gray-500">Plain comma-separated file</span>
-                    </div>
+                  <DropdownMenuItem asChild>
+                    <a
+                      href="/products_upload_template.csv"
+                      download="products_upload_template.csv"
+                      className="flex items-center gap-2.5 cursor-pointer py-2 px-2.5 rounded-md hover:bg-blue-50 text-gray-800 transition-colors w-full no-underline"
+                      onClick={() => toast.success("CSV Template downloaded!")}
+                    >
+                      <Download className="w-4 h-4 text-blue-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-xs text-gray-900">CSV Template (.csv)</span>
+                        <span className="text-[10px] text-gray-500">Plain comma-separated file</span>
+                      </div>
+                    </a>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

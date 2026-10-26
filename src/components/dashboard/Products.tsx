@@ -884,17 +884,19 @@ const Products = () => {
       "PROD-001"
     ];
 
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + headers.join(",") + "\n"
+    const csvContent = headers.join(",") + "\n"
       + sampleRow.map(v => `"${v}"`).join(",");
       
-    const encodedUri = encodeURI(csvContent);
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.href = url;
     link.setAttribute("download", "products_upload_template.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Template downloaded successfully!");
   };
 
   const handleSaveMultipleProducts = async (productsToSave: any[]) => {

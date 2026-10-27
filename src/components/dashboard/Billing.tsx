@@ -14,6 +14,8 @@ import {
   User,
   Phone,
   PackageSearch,
+  Scissors,
+  Sparkles,
   Undo2,
   RefreshCw,
   X,
@@ -39,7 +41,6 @@ import { SyncIndicator } from '@/components/SyncIndicator';
 import { BillRenderer } from "@/components/BillRenderer";
 import { mapExeBillData } from "@/utils/exeBillAdapter";
 import { useReactToPrint } from 'react-to-print';
-import ServiceSelector from './ServiceSelector';
 
 // --- Reusable Center Popup ---
 
@@ -123,19 +124,23 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 const standardizeProduct = (p: any) => {
   const price = Number(p.price || p.RetailSellingPrice || p.sellingPrice || 0);
+  const isService = p.type === 'SERVICE' || p.systemType === 'SERVICE';
+  const isPackage = p.type === 'PACKAGE' || p.systemType === 'PACKAGE';
 
   return {
     ...p,
     id: p.id,
-    barcode: p.barcode || p.id,
+    barcode: p.barcode || (isService ? '' : p.id),
     name: p.name,
     price: price,
-    stockQuantity: p.inventoryTracking === 'NOT_TRACKED' ? null : Number(p.stockQuantity || p.RetailStockQuantity || 0),
+    stockQuantity: isService || p.inventoryTracking === 'NOT_TRACKED' ? null : Number(p.stockQuantity || p.RetailStockQuantity || 0),
     availabilityStatus: p.availabilityStatus || 'AVAILABLE',
-    inventoryTracking: p.inventoryTracking || 'NOT_TRACKED',
+    inventoryTracking: isService ? 'NOT_TRACKED' : (p.inventoryTracking || 'NOT_TRACKED'),
     gst: Number(p.gst || p.GST || p.gstPercent || 0),
     imageUrl: p.imageUrl || "",
-    systemType: p.systemType || "Retail"
+    systemType: p.systemType || (isService ? "SERVICE" : (isPackage ? "PACKAGE" : "Retail")),
+    type: p.type || (isService ? "SERVICE" : (isPackage ? "PACKAGE" : "PRODUCT")),
+    duration: p.duration
   };
 };
 
@@ -624,11 +629,26 @@ const Billing: React.FC = () => {
   const [customerSuggestions, setCustomerSuggestions] = useState<any[]>([]);
   const [phoneSuggestions, setPhoneSuggestions] = useState<any[]>([]);
   const [productSuggestions, setProductSuggestions] = useState<any[]>([]);
+  const [searchFilter, setSearchFilter] = useState<'ALL' | 'SERVICES' | 'PRODUCTS'>('ALL');
 
   const { confirm: confirmAction, ConfirmationDialog } = useConfirm();
 
   const addProductToBill = (product: any) => {
     console.log('[BILLING DEBUG] addProductToBill called with:', product);
+    const isService = product.type === 'SERVICE' || product.systemType === 'SERVICE' || (product as any).itemType === 'SERVICE';
+    if (isService) {
+      handleAddService(product as any);
+      setBarcode("");
+      setProductSuggestions([]);
+      setSearchResults([]);
+      setIsProductDropdownOpen(false);
+      toast.success(`Added ${product.name}`);
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 50);
+      return;
+    }
+
     const detectedType = product.systemType || "Retail";
 
     setLastSelectedProduct(product);
@@ -673,7 +693,7 @@ const Billing: React.FC = () => {
     setBarcode("");
     setProductSuggestions([]);
     setSearchResults([]);
-    setIsSelectionModalOpen(false);
+    setIsProductDropdownOpen(false);
     toast.success(`Added ${product.name}`);
     setTimeout(() => {
       barcodeInputRef.current?.focus();
@@ -687,20 +707,25 @@ const Billing: React.FC = () => {
     if (val.trim()) {
       const normalizeId = (id: any) => id ? id.toString().replace(/^0+/, '') : '';
       const normalizedInput = normalizeId(val);
+      const query = val.toLowerCase().trim();
+
       const allSearchableItems = [
-        ...globalProducts,
-        ...salonServices.map(s => ({ ...s, systemType: 'SERVICE', price: s.price })),
-        ...packages.map(p => ({ ...p, systemType: 'PACKAGE', price: p.price }))
+        ...salonServices.map(s => ({ ...standardizeProduct(s), itemType: 'SERVICE', type: 'SERVICE', systemType: 'SERVICE' })),
+        ...globalProducts.map(p => ({ ...standardizeProduct(p), itemType: 'PRODUCT', type: 'PRODUCT', systemType: p.systemType || 'Retail' })),
+        ...packages.map(p => ({ ...standardizeProduct(p), itemType: 'PACKAGE', type: 'PACKAGE', systemType: 'PACKAGE' }))
       ];
 
       const matches = allSearchableItems
-        .filter(p =>
-          (((p as any).barcode && normalizeId((p as any).barcode) === normalizedInput)) ||
-          (p.id && normalizeId(p.id) === normalizedInput) ||
-          (p.name && p.name.toLowerCase().includes(val.toLowerCase()))
-        )
-        .slice(0, 10)
-        .map(p => standardizeProduct(p));
+        .filter(p => {
+          if (searchFilter === 'SERVICES' && p.type !== 'SERVICE') return false;
+          if (searchFilter === 'PRODUCTS' && p.type !== 'PRODUCT') return false;
+
+          const matchBarcode = (p as any).barcode && normalizeId((p as any).barcode) === normalizedInput;
+          const matchId = p.id && normalizeId(p.id) === normalizedInput;
+          const matchName = p.name && p.name.toLowerCase().includes(query);
+          return matchBarcode || matchId || matchName;
+        })
+        .slice(0, 20);
 
       setProductSuggestions(matches);
       setIsProductDropdownOpen(true);
@@ -711,19 +736,56 @@ const Billing: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (barcode.trim()) {
+      const normalizeId = (id: any) => id ? id.toString().replace(/^0+/, '') : '';
+      const normalizedInput = normalizeId(barcode);
+      const query = barcode.toLowerCase().trim();
+
+      const allSearchableItems = [
+        ...salonServices.map(s => ({ ...standardizeProduct(s), itemType: 'SERVICE', type: 'SERVICE', systemType: 'SERVICE' })),
+        ...globalProducts.map(p => ({ ...standardizeProduct(p), itemType: 'PRODUCT', type: 'PRODUCT', systemType: p.systemType || 'Retail' })),
+        ...packages.map(p => ({ ...standardizeProduct(p), itemType: 'PACKAGE', type: 'PACKAGE', systemType: 'PACKAGE' }))
+      ];
+
+      const matches = allSearchableItems
+        .filter(p => {
+          if (searchFilter === 'SERVICES' && p.type !== 'SERVICE') return false;
+          if (searchFilter === 'PRODUCTS' && p.type !== 'PRODUCT') return false;
+
+          const matchBarcode = (p as any).barcode && normalizeId((p as any).barcode) === normalizedInput;
+          const matchId = p.id && normalizeId(p.id) === normalizedInput;
+          const matchName = p.name && p.name.toLowerCase().includes(query);
+          return matchBarcode || matchId || matchName;
+        })
+        .slice(0, 20);
+
+      setProductSuggestions(matches);
+      setIsProductDropdownOpen(true);
+      setHighlightedProductIndex(0);
+    }
+  }, [searchFilter]);
+
   const handleProductKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setIsProductDropdownOpen(true);
-      setHighlightedProductIndex(prev => (prev + 1) % productSuggestions.length);
+      setHighlightedProductIndex(prev => (prev + 1) % (productSuggestions.length || 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setIsProductDropdownOpen(true);
-      setHighlightedProductIndex(prev => (prev - 1 + productSuggestions.length) % productSuggestions.length);
+      setHighlightedProductIndex(prev => (prev - 1 + productSuggestions.length) % (productSuggestions.length || 1));
     } else if (e.key === "Enter") {
       if (isProductDropdownOpen && productSuggestions.length > 0) {
         e.preventDefault();
-        addProductToBill(productSuggestions[highlightedProductIndex]);
+        const selected = productSuggestions[highlightedProductIndex];
+        if (selected) {
+          if (selected.type === 'SERVICE' || selected.systemType === 'SERVICE' || selected.itemType === 'SERVICE') {
+            handleAddService(selected);
+          } else {
+            addProductToBill(selected);
+          }
+        }
         setIsProductDropdownOpen(false);
       } else {
         handleAddProduct();
@@ -1037,7 +1099,16 @@ const Billing: React.FC = () => {
     );
 
     if (matches.length === 1) {
-      addToItems(matches[0]);
+      const match = matches[0];
+      if (match.type === 'SERVICE' || match.systemType === 'SERVICE' || (match as any).itemType === 'SERVICE') {
+        handleAddService(match as any);
+        setBarcode("");
+        setProductSuggestions([]);
+        setSearchResults([]);
+        setIsProductDropdownOpen(false);
+      } else {
+        addToItems(match);
+      }
       return;
     } else if (matches.length > 1) {
       setSearchResults(matches);
@@ -2169,74 +2240,188 @@ const Billing: React.FC = () => {
             </div>
           </div>
 
-          {/* Search Areas */}
-          <div className="p-4 bg-white/60 border-b border-gray-100">
-            {/* Search Input Area */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Unified Search Area */}
+          <div className="p-4 bg-white/70 border-b border-gray-100 backdrop-blur-sm">
+            <motion.div className="bg-white p-2.5 rounded-2xl shadow-sm border border-gray-200/80 flex flex-col md:flex-row md:items-center gap-3 transition-all hover:shadow-md focus-within:ring-2 focus-within:ring-pink-500/20 focus-within:border-pink-400 relative z-50">
+              
+              {/* Type Filter Buttons */}
+              <div className="flex items-center gap-1 bg-gray-100/90 p-1 rounded-xl shrink-0 border border-gray-200/60 self-start md:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setSearchFilter('ALL')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    searchFilter === 'ALL'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  All Items
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchFilter('SERVICES')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all ${
+                    searchFilter === 'SERVICES'
+                      ? 'bg-pink-600 text-white shadow-sm shadow-pink-200'
+                      : 'text-gray-600 hover:text-pink-600'
+                  }`}
+                >
+                  <Scissors size={13} />
+                  Services
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchFilter('PRODUCTS')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all ${
+                    searchFilter === 'PRODUCTS'
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                      : 'text-gray-600 hover:text-blue-600'
+                  }`}
+                >
+                  <PackageSearch size={13} />
+                  Products
+                </button>
+              </div>
 
-              {/* Product Search */}
-              <motion.div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-2 transition-all hover:shadow-md focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-300 relative z-50">
-                <div className="pl-3 text-blue-400">
-                  <PackageSearch size={20} />
+              {/* Main Search Input */}
+              <div className="relative flex-1 flex items-center min-w-0">
+                <div className="pl-2 pr-2 text-pink-500 shrink-0">
+                  <Search size={20} />
                 </div>
-                <div className="relative flex-1">
-                  <input type="text" placeholder="Scan Barcode or Enter Product Name..." value={barcode}
-                    ref={barcodeInputRef}
-                    onChange={handleProductSearchChange}
-                    onKeyDown={handleProductKeyDown}
-                    onFocus={() => { if (barcode.trim()) setIsProductDropdownOpen(true); }}
-                    className="w-full bg-transparent border-none focus:ring-0 text-gray-700 placeholder-gray-400 font-medium py-2 px-2 text-sm outline-none"
-                  />
-                  {isProductDropdownOpen && productSuggestions.length > 0 && (
-                    <div className="absolute top-full mt-2 left-0 w-full bg-white border-2 border-blue-600 rounded-xl shadow-2xl z-[9999] max-h-60 overflow-y-auto ring-4 ring-blue-500/10 divide-y divide-gray-100 animate-in fade-in-50 duration-150">
-                      <div className="px-3 py-1.5 bg-blue-50 text-[10px] font-black uppercase tracking-wider text-blue-800 flex items-center justify-between sticky top-0 z-10 border-b border-blue-200">
-                        <span className="flex items-center gap-1"><PackageSearch size={12} /> Matching Products</span>
-                        <span className="text-[9px] text-blue-600 font-semibold">↑↓ to navigate, Enter to select</span>
-                      </div>
-                      {productSuggestions.map((prod, idx) => (
+                <input
+                  type="text"
+                  placeholder="Search salon services or scan barcode / enter product name..."
+                  value={barcode}
+                  ref={barcodeInputRef}
+                  onChange={handleProductSearchChange}
+                  onKeyDown={handleProductKeyDown}
+                  onFocus={() => { if (barcode.trim()) setIsProductDropdownOpen(true); }}
+                  className="w-full bg-transparent border-none focus:ring-0 text-gray-800 placeholder-gray-400 font-medium py-1.5 px-1 text-sm outline-none"
+                />
+
+                {barcode && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBarcode("");
+                      setProductSuggestions([]);
+                      setIsProductDropdownOpen(false);
+                      barcodeInputRef.current?.focus();
+                    }}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded-full transition-colors mr-1"
+                    title="Clear search"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+
+                {/* Dropdown Suggestions */}
+                {isProductDropdownOpen && productSuggestions.length > 0 && (
+                  <div className="absolute top-full mt-2.5 left-0 w-full bg-white border border-gray-200 rounded-2xl shadow-2xl z-[9999] max-h-80 overflow-y-auto ring-4 ring-pink-500/10 divide-y divide-gray-100 animate-in fade-in-50 duration-150">
+                    <div className="px-4 py-2 bg-gradient-to-r from-pink-50 via-purple-50 to-blue-50 text-[11px] font-bold text-gray-700 flex items-center justify-between sticky top-0 z-10 border-b border-gray-200 backdrop-blur">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles size={14} className="text-pink-600" />
+                        <span>Available Items ({productSuggestions.length})</span>
+                      </span>
+                      <span className="text-[10px] text-gray-500 font-medium hidden sm:inline">
+                        Use ↑↓ to navigate, Enter to select
+                      </span>
+                    </div>
+
+                    {productSuggestions.map((item, idx) => {
+                      const isService = item.type === 'SERVICE' || item.systemType === 'SERVICE' || item.itemType === 'SERVICE';
+                      const isPackage = item.type === 'PACKAGE' || item.systemType === 'PACKAGE' || item.itemType === 'PACKAGE';
+                      const isHighlighted = idx === highlightedProductIndex;
+
+                      return (
                         <div
-                          key={prod.id || prod.barcode}
-                          className={`px-3 py-2 text-sm cursor-pointer border-b border-gray-50 last:border-b-0 flex justify-between items-center transition-colors ${idx === highlightedProductIndex ? 'bg-blue-600 text-white' : 'hover:bg-blue-50 text-gray-800'}`}
+                          key={item.id || item.barcode || idx}
+                          className={`px-4 py-3 text-sm cursor-pointer border-b border-gray-50 last:border-b-0 flex justify-between items-center transition-all ${
+                            isHighlighted
+                              ? (isService ? 'bg-pink-600 text-white' : 'bg-blue-600 text-white')
+                              : (isService ? 'hover:bg-pink-50/70 text-gray-800' : 'hover:bg-blue-50/70 text-gray-800')
+                          }`}
                           onMouseEnter={() => setHighlightedProductIndex(idx)}
                           onClick={() => {
-                            addProductToBill(prod);
+                            if (isService) {
+                              handleAddService(item);
+                            } else {
+                              addProductToBill(item);
+                            }
                             setIsProductDropdownOpen(false);
                           }}
                         >
-                          <div>
-                            <div className={`font-bold ${idx === highlightedProductIndex ? 'text-white' : 'text-gray-900'}`}>{prod.name}</div>
-                            <div className={`text-xs ${idx === highlightedProductIndex ? 'text-blue-100' : 'text-gray-500'} font-mono`}>{prod.barcode || prod.id}</div>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`p-2 rounded-xl shrink-0 ${
+                              isHighlighted
+                                ? 'bg-white/20 text-white'
+                                : (isService ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-600')
+                            }`}>
+                              {isService ? <Scissors size={18} /> : <PackageSearch size={18} />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`font-bold truncate ${isHighlighted ? 'text-white' : 'text-gray-900'}`}>
+                                  {item.name}
+                                </span>
+                                <span className={`text-[10px] uppercase px-2 py-0.5 rounded-full font-bold tracking-wide shrink-0 ${
+                                  isHighlighted
+                                    ? 'bg-white/25 text-white border border-white/30'
+                                    : (isService ? 'bg-pink-100 text-pink-700 border border-pink-200' : 'bg-blue-100 text-blue-700 border border-blue-200')
+                                }`}>
+                                  {isService ? 'Service' : (isPackage ? 'Package' : 'Product')}
+                                </span>
+                              </div>
+                              <div className={`text-xs mt-0.5 flex items-center gap-2 font-mono ${isHighlighted ? 'text-white/80' : 'text-gray-500'}`}>
+                                {isService ? (
+                                  <span>{item.duration ? `${item.duration} mins` : 'Salon Service'}</span>
+                                ) : (
+                                  <span>Barcode: {item.barcode || item.id}</span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <div className={`font-bold ${idx === highlightedProductIndex ? 'text-white' : 'text-green-600'}`}>₹{prod.price}</div>
-                            <div className={`text-xs ${idx === highlightedProductIndex ? 'text-blue-100' : 'text-gray-500'}`}>Stock: {prod.stockQuantity ?? 'N/A'}</div>
+
+                          <div className="text-right shrink-0 ml-3">
+                            <div className={`font-extrabold text-base ${isHighlighted ? 'text-white' : 'text-green-600'}`}>
+                              ₹{item.price}
+                            </div>
+                            {!isService && (
+                              <div className={`text-xs font-medium ${isHighlighted ? 'text-white/80' : 'text-gray-500'}`}>
+                                Stock: {item.stockQuantity ?? 'N/A'}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {lastSelectedProduct?.imageUrl && (
-                  <div className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border border-gray-100 cursor-zoom-in mr-1 shadow-sm" onClick={() => setZoomedImage(lastSelectedProduct.imageUrl)}>
-                    <img src={lastSelectedProduct.imageUrl} alt="" className="w-full h-full object-cover" />
+                      );
+                    })}
                   </div>
                 )}
+              </div>
 
-                <button onClick={handleAddProduct} disabled={loading}
-                  className={`px-3 py-1.5 text-sm text-sm rounded-xl text-sm font-bold shadow-sm transition-all ${loading ? 'bg-gray-100 text-gray-400' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200'}`}
+              {lastSelectedProduct?.imageUrl && (
+                <div
+                  className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border border-gray-100 cursor-zoom-in mr-1 shadow-sm"
+                  onClick={() => setZoomedImage(lastSelectedProduct.imageUrl)}
+                  title="Click to zoom image"
                 >
-                  {loading ? "..." : "Add"}
-                </button>
-              </motion.div>
-
-              {/* Service Search */}
-              <motion.div className="relative z-40 h-full flex items-center">
-                <div className="w-full">
-                  <ServiceSelector onAddService={handleAddService} disabled={loading} />
+                  <img src={lastSelectedProduct.imageUrl} alt="" className="w-full h-full object-cover" />
                 </div>
-              </motion.div>
-            </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleAddProduct}
+                disabled={loading}
+                className={`px-5 py-2 text-sm rounded-xl font-bold shadow-sm transition-all shrink-0 ${
+                  loading
+                    ? 'bg-gray-100 text-gray-400'
+                    : 'bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-700 hover:to-indigo-700 text-white shadow-pink-200'
+                }`}
+              >
+                {loading ? "..." : "Add to Bill"}
+              </button>
+            </motion.div>
           </div>
 
           {/* Table Container */}

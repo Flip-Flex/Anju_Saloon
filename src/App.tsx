@@ -17,6 +17,7 @@ import Products from '@/components/dashboard/Products';
 
 import DailyActions from '@/components/dashboard/DailyActions';
 import Suppliers from '@/components/dashboard/Suppliers';
+import SupplierDetails from '@/components/dashboard/SupplierDetails';
 import Customers from '@/components/dashboard/Customers';
 import CustomerDetails from '@/components/dashboard/CustomerDetails';
 import StaffManagement from '@/components/dashboard/StaffManagement';
@@ -56,6 +57,7 @@ const App = () => {
                   <Route path="billing" element={<Billing />} />
                   <Route path="products" element={<Products />} />
                   <Route path="suppliers" element={<Suppliers />} />
+                  <Route path="suppliers/:id" element={<SupplierDetails />} />
                   <Route path="customers" element={<Customers />} />
                   <Route path="customers/:id" element={<CustomerDetails />} />
                   <Route path="view-product" element={<ViewProduct />} />
@@ -83,6 +85,7 @@ const App = () => {
                   <Route path="appointments" element={<Appointments />} />
                   <Route path="customers" element={<Customers />} />
                   <Route path="customers/:id" element={<CustomerDetails />} />
+                  <Route path="suppliers/:id" element={<SupplierDetails />} />
                   <Route path="daily-actions" element={<DailyActions />} />
                   <Route path="printed-bills" element={<PrintedBills />} />
                   <Route path="sales-report" element={<CashierReports />} />

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Pencil, Trash2, PlusCircle, X, Upload, CreditCard, Loader2, Save } from 'lucide-react';
+import { Pencil, Trash2, PlusCircle, X, Upload, CreditCard, Loader2, Save, Eye } from 'lucide-react';
 import { vendorService, Vendor } from '@/lib/api';
 import { useGlobalData } from '@/context/GlobalDataContext';
 import Papa from 'papaparse';
@@ -9,6 +10,7 @@ import { SyncIndicator } from '@/components/SyncIndicator';
 import { useConfirm } from '@/hooks/useConfirm';
 
 const Suppliers = () => {
+  const navigate = useNavigate();
   const { vendors: suppliers, loading: globalLoading, refreshVendors: refreshSuppliers, isSyncing } = useGlobalData();
   const { confirm: confirmAction, ConfirmationDialog } = useConfirm();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -245,16 +247,45 @@ const Suppliers = () => {
                       </>
                     ) : (
                       <>
-                        <td className="p-4 font-medium">{s.name}</td>
+                        <td className="p-4 font-medium">
+                          <button
+                            onClick={() => navigate(`/admin/suppliers/${s.id}`)}
+                            className="text-pink-600 hover:text-pink-800 font-semibold hover:underline text-left inline-flex items-center gap-1.5 group"
+                            title="View Supplier Details"
+                          >
+                            <span>{s.name}</span>
+                          </button>
+                        </td>
                         <td className="p-4 text-slate-500 italic">{s.nickname || '-'}</td>
                         <td className="p-4 font-mono">{s.id}</td>
                         <td className="p-4">{s.phone}</td>
                         <td className="p-4">{s.gstin}</td>
                         <td className="p-4">{s.address}</td>
                         <td className="p-4">
-                          <button onClick={() => handleEditClick(s)} className="text-blue-600 hover:text-blue-800"><Pencil size={18} /></button>
+                          <button
+                            onClick={() => navigate(`/admin/suppliers/${s.id}`)}
+                            title="View Supplier Details"
+                            className="text-pink-600 hover:text-pink-800 p-1 hover:bg-pink-50 rounded"
+                          >
+                            <Eye size={18} />
+                          </button>
 
-                          <button onClick={() => handleDeleteSupplier(s.id)} disabled={deletingId === s.id} className="text-red-600 hover:text-red-800 ml-3 disabled:opacity-50">{deletingId === s.id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}</button>
+                          <button
+                            onClick={() => handleEditClick(s)}
+                            title="Edit Supplier"
+                            className="text-blue-600 hover:text-blue-800 ml-2 p-1 hover:bg-blue-50 rounded"
+                          >
+                            <Pencil size={18} />
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteSupplier(s.id)}
+                            title="Delete Supplier"
+                            disabled={deletingId === s.id}
+                            className="text-red-600 hover:text-red-800 ml-2 p-1 hover:bg-red-50 rounded disabled:opacity-50"
+                          >
+                            {deletingId === s.id ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                          </button>
                         </td>
                       </>
                     )}

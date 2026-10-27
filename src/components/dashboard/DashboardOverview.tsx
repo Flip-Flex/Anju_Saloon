@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   TrendingUp, TrendingDown, DollarSign, ShoppingCart,
   Package, AlertTriangle, Download, Users, Check, X, Pencil, Calendar,
   Crown, Award, Medal, Sparkles, Scissors, Flame, ArrowUpRight, UserCheck, Star,
-  Search, Filter
+  Search, Filter, Building2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -22,6 +23,7 @@ import LowStockProductsModal from './LowStockProductsModal';
 type DashboardPeriod = 'day' | 'week' | 'month' | 'year';
 
 const DashboardOverview = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
@@ -1089,6 +1091,22 @@ const DashboardOverview = () => {
           </div>
           <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900 truncate">{staff.filter(s => s.isActive).length}</h3>
         </div>
+
+        {/* Suppliers Count / Quick Link */}
+        <div
+          onClick={() => navigate('/admin/suppliers')}
+          className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between min-h-[100px] cursor-pointer hover:border-pink-300 hover:bg-pink-50/30 transition-all group"
+          title="Click to view Supplier Details & Products"
+        >
+          <div className="flex justify-between items-start">
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider group-hover:text-pink-600 transition-colors">Suppliers</p>
+            <Building2 size={16} className="text-slate-400 group-hover:text-pink-500 transition-colors" />
+          </div>
+          <div className="flex items-baseline justify-between mt-1">
+            <h3 className="text-xl sm:text-2xl font-semibold tracking-tighter text-slate-900">{vendors.length}</h3>
+            <span className="text-[10px] text-pink-600 font-bold group-hover:underline">Details &rarr;</span>
+          </div>
+        </div>
       </div>
 
       <LowStockProductsModal
@@ -1364,7 +1382,22 @@ const DashboardOverview = () => {
                         </td>
                         <td className="p-3">
                           <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
-                          <p className="text-[10px] text-slate-400 font-mono mt-0.5">{p.id || p.barcode}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-slate-400 font-mono">{p.id || p.barcode}</span>
+                            {(p.vendorName || p.vendorId) && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/admin/suppliers/${p.vendorId || p.vendorName}`);
+                                }}
+                                className="text-[10px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 inline-flex items-center gap-1 transition-colors"
+                                title={`Supplier: ${p.vendorName || p.vendorId}`}
+                              >
+                                <Building2 size={10} />
+                                <span className="truncate max-w-[100px]">{p.vendorName || p.vendorId}</span>
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="p-3">
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">

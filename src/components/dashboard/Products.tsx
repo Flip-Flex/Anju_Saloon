@@ -1,12 +1,12 @@
 import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   Pencil, Trash2, PlusCircle, X, Layers, Upload, Download, Printer, ListPlus,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CheckCircle, Info, Calendar,
   CreditCard, CheckCircle2, AlertCircle, RefreshCw, UserPlus, UserCheck, DollarSign, Image as ImageIcon,
-  FileSpreadsheet, ChevronDown
+  FileSpreadsheet, ChevronDown, Building2
 } from 'lucide-react';
 import { utils, writeFile, read } from 'xlsx';
 import {
@@ -174,6 +174,7 @@ const normalizeGst = (gst: string) => {
 };
 
 const Products = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin';
   const { products: globalProducts, vendors: globalVendors, loading: globalLoading, refreshProducts, refreshVendors, isSyncing } = useGlobalData();
@@ -1149,6 +1150,7 @@ const Products = () => {
                     <th className="p-4">Image</th>
                     <th className="p-4">Product Name</th>
                     <th className="p-4">Category</th>
+                    <th className="p-4">Supplier</th>
                     <th className="p-4">Buy Rate</th>
                     <th className="p-4">GST %</th>
                     <th className="p-4">P.Disc %</th>
@@ -1200,6 +1202,13 @@ const Products = () => {
                             >
                               {categories.map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
+                          </td>
+
+                          {/* Supplier */}
+                          <td className="p-4">
+                            <span className="text-xs text-gray-500 font-medium truncate max-w-[100px] block" title={product.vendorName || product.vendorId || ''}>
+                              {product.vendorName || product.vendorId || '-'}
+                            </span>
                           </td>
 
                           {/* Buy Rate */}
@@ -1346,6 +1355,23 @@ const Products = () => {
                           </div>
                         </td>
                         <td className="p-4">{product.category}</td>
+                        <td className="p-4">
+                          {product.vendorId || product.vendorName ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/admin/suppliers/${product.vendorId || product.vendorName}`);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 transition-colors"
+                              title={`View Supplier Profile: ${product.vendorName || product.vendorId}`}
+                            >
+                              <Building2 className="w-3 h-3 text-amber-600 shrink-0" />
+                              <span className="truncate max-w-[120px]">{product.vendorName || product.vendorId}</span>
+                            </button>
+                          ) : (
+                            <span className="text-gray-400 text-xs italic">-</span>
+                          )}
+                        </td>
                         <td className="p-4">₹{parseFloat((product.purchaseRate || 0).toFixed(2))}</td>
                         <td className="p-4">{parseFloat((Number(product.purchaseGst) || 0).toFixed(2))}%</td>
                         <td className="p-4">{(product.purchaseDisc || 0)}%</td>

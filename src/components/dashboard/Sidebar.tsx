@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { ShoppingCart, Package, Users, BarChart2, Settings, LogOut, Printer, ClipboardList, Briefcase, ChevronLeft, ChevronRight, Scissors, Calendar, ArchiveRestore, Gift } from 'lucide-react';
+import { ShoppingCart, Package, Users, BarChart2, Settings, LogOut, Printer, ClipboardList, Briefcase, ChevronLeft, ChevronRight, Scissors, Calendar, ArchiveRestore, Gift, Building2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 const Sidebar = () => {
@@ -20,6 +20,7 @@ const Sidebar = () => {
     { name: 'Packages', path: '/admin/packages', icon: Gift },
     { name: 'Appointments', path: '/admin/appointments', icon: Calendar },
     { name: 'Stock Movements', path: '/admin/stock-movements', icon: ArchiveRestore },
+    { name: 'Supplier Details', path: '/admin/suppliers', icon: Building2 },
     { name: 'Customer Details', path: '/admin/customers', icon: Users },
     { name: 'Staff Management', path: '/admin/staff', icon: Briefcase },
     { name: 'Printed Bills', path: '/admin/printed-bills', icon: Printer },
@@ -43,7 +44,7 @@ const Sidebar = () => {
           <NavLink
             key={item.name}
             to={item.path}
-            end
+            end={item.path === '/admin' || item.path === '/admin/dashboard'}
             title={isCollapsed ? item.name : undefined}
             className={({ isActive }) =>
               `flex items-center py-3 rounded-lg transition-colors ${isActive ? 'bg-blue-700 shadow-inner' : 'hover:bg-blue-600'

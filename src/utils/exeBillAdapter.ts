@@ -5,6 +5,7 @@ export const mapExeBillData = (source: any) => {
     customerPhone: source.customerPhone || source.phone || "",
     customerAddress: source.customerAddress || source.address || "",
     customerGst: source.customerGst || source.gstin || "",
+    status: source.status,
     items: (source.items || []).map((item: any) => {
       const q = Number(item.qty || item.quantity || item.billQty || 0);
       const p = Number(item.price || item.unitPrice || item.rate || 0);
@@ -21,6 +22,8 @@ export const mapExeBillData = (source: any) => {
         ...item,
         productName: item.name || item.productName || item.particulars,
         productId: item.productId || item.barcode || item.barcodeNo || item.id || "",
+        type: item.type,
+        staffName: item.staffName,
         quantity: q,
         unitPrice: p,
         discount: discountAmt,
@@ -33,6 +36,10 @@ export const mapExeBillData = (source: any) => {
     }),
     subtotal: source.subTotal || source.subtotal || source.totalTaxableAmount || 0,
     finalAmount: source.total || source.totalAmount || source.finalAmount || 0,
+    amountPaid: source.amountPaid,
+    receivedAmount: source.receivedAmount,
+    cashAmount: source.cashAmount,
+    onlineAmount: source.onlineAmount,
     cgstAmount: source.cgstAmount || 0,
     sgstAmount: source.sgstAmount || 0,
     igstAmount: source.igstAmount || 0,

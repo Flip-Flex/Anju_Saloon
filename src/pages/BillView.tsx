@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { billingApi, Bill } from '@/lib/api';
@@ -52,12 +51,14 @@ const BillView = () => {
             const pdf = new jsPDF({
                 orientation: 'portrait',
                 unit: 'mm',
-                format: [72, (canvas.height * 72) / canvas.width]
+                format: 'a5'
             });
 
-            pdf.addImage(imgData, 'PNG', 0, 0, 72, (canvas.height * 72) / canvas.width);
-            pdf.save(`Bill_${bill.id}.pdf`);
-            toast.success("Invoice downloaded!");
+            const a5Width = 148;
+            const imgHeight = (canvas.height * a5Width) / canvas.width;
+            pdf.addImage(imgData, 'PNG', 0, 0, a5Width, Math.min(imgHeight, 210));
+            pdf.save(`Bill_${bill.invoiceId || bill.id || 'A5'}.pdf`);
+            toast.success("A5 Invoice downloaded!");
         } catch (error) {
             console.error("PDF generation failed", error);
             toast.error("Failed to generate PDF");
@@ -71,11 +72,11 @@ const BillView = () => {
         <div className="min-h-screen bg-gray-100 p-4 flex flex-col items-center">
             {/* Action Buttons */}
             <div className="mb-6 flex gap-4 no-print sticky top-4 z-10">
-                <button onClick={handleDownloadPdf} className="bg-blue-600 text-white px-3 py-1.5 text-sm text-sm rounded-lg flex items-center gap-2 hover:bg-blue-700 shadow-lg font-semibold transition-all">
-                    <Download size={20} /> Download PDF
+                <button onClick={handleDownloadPdf} className="bg-blue-600 text-white px-3 py-1.5 text-sm rounded-lg flex items-center gap-2 hover:bg-blue-700 shadow-lg font-semibold transition-all">
+                    <Download size={20} /> Download A5 PDF
                 </button>
-                <button onClick={() => handlePrint()} className="bg-gray-800 text-white px-3 py-1.5 text-sm text-sm rounded-lg flex items-center gap-2 hover:bg-gray-900 shadow-lg font-semibold transition-all">
-                    <Printer size={20} /> Print Thermal
+                <button onClick={() => handlePrint()} className="bg-gray-800 text-white px-3 py-1.5 text-sm rounded-lg flex items-center gap-2 hover:bg-gray-900 shadow-lg font-semibold transition-all">
+                    <Printer size={20} /> Print A5 Bill
                 </button>
             </div>
 

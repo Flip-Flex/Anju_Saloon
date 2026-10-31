@@ -1,10 +1,10 @@
 import React from "react";
-import { WholesaleBillLayout } from "@/components/billing/WholesaleBillLayout";
+import { A5BillLayout } from "@/components/billing/A5BillLayout";
 
 export const BillRenderer = React.forwardRef(({ data }: any, ref: any) => {
   return (
     <div ref={ref} className="print-container">
-      <WholesaleBillLayout data={data} />
+      <A5BillLayout data={data} />
     </div>
   );
 });

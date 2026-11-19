@@ -6,7 +6,7 @@ import {
     FileText, UploadCloud, DollarSign, Timer, Users, Briefcase, CreditCard, Shield, Activity,
     UserCheck, Save, Edit3, Key, Lock, Mail
 } from 'lucide-react';
-import { staffApi, Staff, Attendance, Role, Commission, billingApi } from '@/lib/api';
+import { staffApi, Staff, Attendance, Commission, billingApi } from '@/lib/api';
 import {
     format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay,
     addMonths, subMonths, getDay, isToday, startOfWeek, endOfWeek, isSameMonth
@@ -36,7 +36,8 @@ const StaffManagement = () => {
                 toast.success("Staff deleted successfully");
                 refreshStaff();
             } catch (error) {
-                toast.error("Failed to delete staff");
+                const reason = error instanceof Error ? error.message : String(error);
+                toast.error(`Failed to delete staff: ${reason}`);
             } finally {
                 setDeletingId(null);
             }
@@ -1245,13 +1246,17 @@ const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
             nextRef.current?.focus();
         }
     };
-    const [roles, setRoles] = useState<Role[]>([]);
+    // DEAD CODE (commented out): `roles` was fetched from the API but never rendered
+    // anywhere — the Role <select> below uses a hardcoded list of options.
+    // const [roles, setRoles] = useState<Role[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [uploading, setUploading] = useState(false);
 
     useEffect(() => {
-        const fetchRoles = async () => { try { const res = await staffApi.getRoles(); setRoles(res.data || []); } catch (e) { } };
-        fetchRoles();
+        // DEAD CODE (commented out): fetchRoles() always returned [] (route not implemented)
+        // and the result was never used, so it only produced a pointless network round-trip.
+        // const fetchRoles = async () => { try { const res = await staffApi.getRoles(); setRoles(res.data || []); } catch (e) { } };
+        // fetchRoles();
         if (staff) {
             setFormData({
                 name: staff.name, email: staff.email || '', phone: staff.phone, emergencyPhone: staff.emergencyPhone || '',
@@ -1286,6 +1291,9 @@ const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
             } else {
                 const addRes: any = await staffApi.add(formData);
                 savedStaffId = addRes?.data?.id || addRes?.id;
+                if (!savedStaffId) {
+                    throw new Error('The staff record was not created in the database. Please try again.');
+                }
             }
 
             // Create Firebase Auth login account if requested and password supplied
@@ -1311,7 +1319,8 @@ const StaffFormModal = ({ staff, onClose, onSuccess }: any) => {
             onSuccess();
         } catch (error) { 
             console.error("Staff save error:", error);
-            toast.error("Operation failed"); 
+            const reason = error instanceof Error ? error.message : String(error);
+            toast.error(`Failed to save staff: ${reason}`); 
         } finally { 
             setIsSaving(false); 
         }

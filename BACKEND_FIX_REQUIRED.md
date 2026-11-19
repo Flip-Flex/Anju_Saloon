@@ -1,3 +1,12 @@
+> # ⚠️ STALE DOCUMENT — DO NOT FOLLOW
+>
+> **This file is obsolete and refers to a Java/Spring Boot backend
+> (`BrokerController.java`, `@PreAuthorize`) that does not exist in this
+> repository.** It is leftover documentation from a previous project.
+> The current app is a Vite/React SPA that talks directly to Firebase
+> Firestore through the client SDK (`src/lib/api.ts`) and has no Java
+> backend. No action from this document is required.
+
 # IMPERATIVE BACKEND FIX REQUIRED (Server 500 Error)
 
 The "Cashier" panel is failing to load Brokers because of a **CRITICAL SYNTAX ERROR** in the Backend Java Code.

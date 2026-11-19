@@ -1,3 +1,16 @@
+// ===========================================================================
+// ⚠️  RETIRED — NOT PART OF THE RUNNING APPLICATION  ⚠️
+//
+// This standalone Express server is disconnected and is never started by any
+// npm script, Dockerfile or nginx config (see PRODUCTION_READINESS_REPORT.md).
+// The frontend talks directly to Firestore through the client SDK; the
+// `firestoreAdapter` interceptor in src/lib/api.ts answers every API call, so
+// none of these routes are ever called by the app.
+//
+// Kept only as a reference / for optional future use (server-side price
+// validation via Firebase Admin and Twilio SMS need a service account key in
+// server/.env — see server/.env.example).
+// ===========================================================================
 import "dotenv/config";
 import express from "express";
 import cors from "cors";

@@ -2,11 +2,24 @@ import axios from 'axios';
 import { auth } from '@/lib/firebase';
 
 const isDev = import.meta.env.MODE === 'development';
-const PRODUCT_SERVICE_URL = isDev ? '/proxy' : 'https://product-service-demo-551828258445.asia-southeast1.run.app/api';
-const BILLING_SERVICE_URL = isDev ? '/proxy' : 'https://billing-service-demo-551828258445.asia-southeast1.run.app/api';
-const VENDOR_SERVICE_URL = isDev ? '/proxy' : 'https://vendor-service-demo-551828258445.asia-southeast1.run.app/api';
-const REPORT_SERVICE_URL = isDev ? '/proxy' : 'https://billing-service-demo-551828258445.asia-southeast1.run.app/api';
-const STAFF_SERVICE_URL = isDev ? '/proxy' : 'https://staff-service-demo-551828258445.asia-southeast1.run.app/api';
+
+// ---------------------------------------------------------------------------
+// DEAD CODE — these backend base URLs are NEVER reached.
+// Every axios request is intercepted by `firestoreAdapter` (registered on all
+// service clients at the bottom of this file) and answered directly from
+// Firestore, so no HTTP request ever leaves the browser. The retired Cloud Run
+// services are kept commented below for reference only.
+// ---------------------------------------------------------------------------
+// const PRODUCT_SERVICE_URL = 'https://product-service-demo-551828258445.asia-southeast1.run.app/api';
+// const BILLING_SERVICE_URL = 'https://billing-service-demo-551828258445.asia-southeast1.run.app/api';
+// const VENDOR_SERVICE_URL = 'https://vendor-service-demo-551828258445.asia-southeast1.run.app/api';
+// const REPORT_SERVICE_URL = 'https://billing-service-demo-551828258445.asia-southeast1.run.app/api';
+// const STAFF_SERVICE_URL = 'https://staff-service-demo-551828258445.asia-southeast1.run.app/api';
+const PRODUCT_SERVICE_URL = isDev ? '/proxy' : '';
+const BILLING_SERVICE_URL = isDev ? '/proxy' : '';
+const VENDOR_SERVICE_URL = isDev ? '/proxy' : '';
+const REPORT_SERVICE_URL = isDev ? '/proxy' : '';
+const STAFF_SERVICE_URL = isDev ? '/proxy' : '';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 
@@ -858,11 +871,144 @@ const firestoreAdapter = async (config: any) => {
     }
     if (url.includes('/staff/add') && method === 'post') {
       const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
-      const ref = await addDoc(collection(db, 'staff'), parsedData);
-      return respond({ id: ref.id, ...parsedData });
+      // Sanitize: strips undefined/File/Blob values that Firestore rejects (prevents
+      // intermittent "Unsupported field value" failures on add).
+      const cleanData = sanitizeForFirestore(parsedData);
+      const ref = await addDoc(collection(db, 'staff'), cleanData);
+      return respond({ id: ref.id, ...cleanData });
     }
-    
+    // GET /staff/:id (single staff member)
+    if (
+      url.includes('/staff/') && method === 'get' &&
+      !url.includes('/staff/all') && !url.includes('/staff/roles') &&
+      !url.includes('/staff/attendance') && !url.includes('/staff/salary') &&
+      !url.includes('/staff/commissions')
+    ) {
+      const id = url.split('?')[0].split('/').filter(Boolean).pop();
+      if (!id) return respond({ error: 'Staff id missing' }, 400);
+      const snap = await getDoc(doc(db, 'staff', id));
+      if (!snap.exists()) return respond({ error: 'Staff not found' }, 404);
+      return respond({ id: snap.id, ...snap.data() });
+    }
+    // PATCH /staff/:id (update staff profile)
+    if (
+      url.includes('/staff/') && method === 'patch' &&
+      !url.includes('/staff/commissions') && !url.includes('/staff/attendance') &&
+      !url.includes('/staff/roles') && !url.includes('/staff/salary')
+    ) {
+      const id = url.split('?')[0].split('/').filter(Boolean).pop();
+      if (!id) return respond({ error: 'Staff id missing' }, 400);
+      const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const cleanData = sanitizeForFirestore(parsedData);
+      await updateDoc(doc(db, 'staff', id), { ...cleanData, updatedAt: new Date().toISOString() });
+      return respond({ id, ...cleanData });
+    }
+    // DELETE /staff/:id (removes the staff member AND their attendance + commission records)
+    if (
+      url.includes('/staff/') && method === 'delete' &&
+      !url.includes('/staff/commissions') && !url.includes('/staff/roles')
+    ) {
+      const id = url.split('?')[0].split('/').filter(Boolean).pop();
+      if (!id) return respond({ error: 'Staff id missing' }, 400);
+
+      // Delete the staff document FIRST, and only cascade if that succeeded.
+      // Firestore rules make staff deletion admin-only, so if this throws (e.g. a
+      // Cashier attempting it), nothing else has been touched yet.
+      await deleteDoc(doc(db, 'staff', id));
+
+      // Cascade: attendance records for this staff member
+      try {
+        const attSnap = await getDocs(query(collection(db, 'attendance'), where('staffId', '==', id)));
+        for (const attDoc of attSnap.docs) await deleteDoc(attDoc.ref);
+      } catch (cascadeErr) {
+        console.error('Failed to delete related attendance records:', cascadeErr);
+      }
+
+      // Cascade: commission records for this staff member
+      try {
+        const commSnap = await getDocs(query(collection(db, 'staff_commissions'), where('staffId', '==', id)));
+        for (const commDoc of commSnap.docs) await deleteDoc(commDoc.ref);
+      } catch (cascadeErr) {
+        console.error('Failed to delete related commission records:', cascadeErr);
+      }
+
+      return respond({ success: true, id });
+    }
+
     // Attendance
+    // Mark attendance (upsert: one record per staff member per day, so re-marking updates)
+    if (url.includes('/staff/attendance/mark-bulk') && method === 'post') {
+      const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const entries = Array.isArray(parsedData) ? parsedData : [];
+      const saved: any[] = [];
+      for (const entry of entries) {
+        const cleanData = sanitizeForFirestore(entry);
+        if (!cleanData?.staffId || !cleanData?.date) continue;
+        const record = {
+          ...cleanData,
+          type: cleanData.type || cleanData.status,
+          updatedAt: new Date().toISOString()
+        };
+        const existing = await getDocs(query(
+          collection(db, 'attendance'),
+          where('staffId', '==', cleanData.staffId),
+          where('date', '==', cleanData.date)
+        ));
+        if (!existing.empty) {
+          await updateDoc(doc(db, 'attendance', existing.docs[0].id), record);
+          saved.push({ id: existing.docs[0].id, ...record });
+        } else {
+          const ref = await addDoc(collection(db, 'attendance'), record);
+          saved.push({ id: ref.id, ...record });
+        }
+      }
+      return respond(saved);
+    }
+    if (url.includes('/staff/attendance/mark') && method === 'post') {
+      const parsedData = typeof config.data === 'string' ? JSON.parse(config.data) : config.data;
+      const cleanData = sanitizeForFirestore(parsedData);
+      if (!cleanData?.staffId || !cleanData?.date) {
+        return respond({ error: 'staffId and date are required' }, 400);
+      }
+      const record = {
+        ...cleanData,
+        type: cleanData.type || cleanData.status,
+        updatedAt: new Date().toISOString()
+      };
+      const existing = await getDocs(query(
+        collection(db, 'attendance'),
+        where('staffId', '==', cleanData.staffId),
+        where('date', '==', cleanData.date)
+      ));
+      if (!existing.empty) {
+        await updateDoc(doc(db, 'attendance', existing.docs[0].id), record);
+        return respond({ id: existing.docs[0].id, ...record });
+      }
+      const ref = await addDoc(collection(db, 'attendance'), record);
+      return respond({ id: ref.id, ...record });
+    }
+    // Daily attendance lookup: /staff/attendance/day/:date
+    if (url.includes('/staff/attendance/day/') && method === 'get') {
+      const date = url.split('/staff/attendance/day/')[1]?.split('?')[0];
+      if (!date) return respond([]);
+      const snap = await getDocs(collection(db, 'attendance'));
+      const results = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((a: any) => a.date === date);
+      return respond(results);
+    }
+    // Monthly attendance lookup: /staff/attendance/month/:year/:month
+    if (url.includes('/staff/attendance/month/') && method === 'get') {
+      const rest = url.split('/staff/attendance/month/')[1]?.split('?')[0] || '';
+      const [year, month] = rest.split('/');
+      const prefix = year && month ? `${year}-${String(month).padStart(2, '0')}` : '';
+      if (!prefix) return respond([]);
+      const snap = await getDocs(collection(db, 'attendance'));
+      const results = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((a: any) => a.date && a.date.startsWith(prefix));
+      return respond(results);
+    }
     if (url.includes('/staff/attendance/staff/') && method === 'get') {
       const parts = url.split('/');
       const yearMonth = parts.pop()!;
